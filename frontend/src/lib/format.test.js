@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fmtBytes, fmtCores, fmtValue, fmtAgo, pct, tone, bounds, linePath, flatChildren } from "./lib.js";
+import { fmtBytes, fmtCores, fmtValue, fmtAgo, pct, tone, bounds, linePath, parseRoute, appHref, shortRev, autoRollbackText } from "./format.js";
 
 test("fmtBytes picks a binary unit", () => {
   assert.equal(fmtBytes(512), "512 B");
@@ -17,6 +17,7 @@ test("fmtCores switches from millicores to cores", () => {
 
 test("fmtValue follows the panel unit", () => {
   assert.equal(fmtValue(0.5, "cores"), "500m");
+  assert.equal(fmtValue(null, "cores"), "–");
   assert.equal(fmtValue(2048, "bytes"), "2.0 KiB");
   assert.equal(fmtValue(3, "count"), "3");
 });
@@ -36,12 +37,12 @@ test("pct clamps and tolerates missing data", () => {
   assert.equal(pct(1, 0), null);
 });
 
-test("tone maps backup and Argo states", () => {
+test("tone maps backup, node, Argo and rollout states", () => {
   assert.equal(tone("ok"), "good");
   assert.equal(tone("stale"), "warn");
   assert.equal(tone("failed"), "bad");
-  assert.equal(tone("Degraded"), "bad");
   assert.equal(tone("NotReady"), "bad");
+  assert.equal(tone("progressing"), "info");
   assert.equal(tone("whatever"), "muted");
 });
 
@@ -53,6 +54,22 @@ test("bounds and linePath scale points into the box", () => {
   assert.equal(bounds([{ label: "x", points: [] }]), null);
 });
 
-test("flatChildren flattens any depth and drops empty children", () => {
-  assert.deepEqual(flatChildren(["a", [["b", null], [false, ["c"]]], undefined, 0]), ["a", "b", "c", 0]);
+test("parseRoute and appHref round-trip", () => {
+  assert.deepEqual(parseRoute(""), { view: "overview" });
+  assert.deepEqual(parseRoute("#backups"), { view: "backups" });
+  assert.deepEqual(parseRoute("#nonsense"), { view: "overview" });
+  assert.deepEqual(parseRoute(appHref("shop-testing", "my app")), { view: "app", namespace: "shop-testing", app: "my app" });
+});
+
+test("shortRev", () => {
+  assert.equal(shortRev("abcdef1234"), "abcdef1");
+  assert.equal(shortRev(""), "–");
+});
+
+test("autoRollbackText explains each state", () => {
+  const r = (auto, allowed, reason = "") => ({ rollback: { auto, allowed, reason, grace: "5m0s" } });
+  assert.match(autoRollbackText(r(true, true), false), /off for this clusterdeck install/);
+  assert.match(autoRollbackText(r(false, true), true), /Annotate/);
+  assert.match(autoRollbackText(r(true, false, "self-heals"), true), /cannot act, for the reason above/);
+  assert.match(autoRollbackText(r(true, true), true), /after 5m0s/);
 });

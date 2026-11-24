@@ -24,6 +24,8 @@ func TestValidation(t *testing.T) {
 		"signoz without key":       {"METRICS_PROVIDER": "signoz", "SIGNOZ_URL": "http://s"},
 		"prometheus without url":   {"METRICS_PROVIDER": "prometheus"},
 		"unknown provider":         {"METRICS_PROVIDER": "datadog"},
+		"auto rollback alone":      {"AUTO_ROLLBACK_ENABLED": "true"},
+		"interval too short":       {"AUTO_ROLLBACK_INTERVAL": "1s"},
 	}
 	for name, e := range cases {
 		if _, err := FromEnv(env(e)); err == nil {
@@ -34,16 +36,21 @@ func TestValidation(t *testing.T) {
 
 func TestFullConfig(t *testing.T) {
 	c, err := FromEnv(env(map[string]string{
-		"ACTIONS_ENABLED":    "true",
-		"AUTH_HEADER":        "X-Forwarded-Email",
-		"AUTH_ALLOWED_USERS": " a@x.io, b@x.io ,",
-		"METRICS_PROVIDER":   "signoz",
-		"SIGNOZ_URL":         "http://signoz",
-		"SIGNOZ_API_KEY":     "k",
-		"HIDE_NAMESPACES":    "",
+		"ACTIONS_ENABLED":       "true",
+		"AUTH_HEADER":           "X-Forwarded-Email",
+		"AUTH_ALLOWED_USERS":    " a@x.io, b@x.io ,",
+		"METRICS_PROVIDER":      "signoz",
+		"SIGNOZ_URL":            "http://signoz",
+		"SIGNOZ_API_KEY":        "k",
+		"HIDE_NAMESPACES":       "",
+		"ACTIONS_NAMESPACES":    "shop,photos",
+		"AUTO_ROLLBACK_ENABLED": "true",
 	}))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !c.AutoRollback || c.AutoRollbackInterval.Seconds() != 30 || len(c.ActionsNamespaces) != 2 {
+		t.Fatalf("auto rollback config = %+v", c)
 	}
 	if !c.ActionsEnabled || len(c.AllowedUsers) != 2 || c.AllowedUsers[1] != "b@x.io" {
 		t.Fatalf("config = %+v", c)

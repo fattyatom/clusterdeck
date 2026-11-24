@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -23,7 +24,8 @@ type fakeCluster struct {
 		ns, name, confirm, user string
 		params                  map[string]string
 	}
-	restarted string
+	restarted  string
+	rolledBack string
 }
 
 func (f *fakeCluster) Overview(context.Context) (*kube.Overview, error) {
@@ -53,6 +55,14 @@ func (f *fakeCluster) RunRestore(_ context.Context, ns, name string, params map[
 func (f *fakeCluster) RestartWorkload(_ context.Context, ns, kind, name string) error {
 	f.restarted = ns + "/" + kind + "/" + name
 	return nil
+}
+
+func (f *fakeCluster) Rollouts(_ context.Context, ns, app string) ([]kube.Rollout, error) {
+	return []kube.Rollout{{Namespace: ns, Name: app + "-web", Phase: "complete"}}, nil
+}
+func (f *fakeCluster) Rollback(_ context.Context, ns, name string, rev int64, user string) (string, error) {
+	f.rolledBack = fmt.Sprintf("%s/%s@%d by %s", ns, name, rev, user)
+	return "ok", nil
 }
 
 type fakeMetrics struct{ window time.Duration }
@@ -200,5 +210,24 @@ func TestLogsEndpoint(t *testing.T) {
 	}
 	if rec := do(s, "GET", "/api/pods/shop/web-1/logs?tail=999999", "", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("tail bound: %d", rec.Code)
+	}
+}
+
+func TestRollouts(t *testing.T) {
+	s, fc, _, _ := newServer(Options{AuthHeader: "X-Forwarded-Email", ActionsEnabled: true})
+	rec := do(s, "GET", "/api/rollouts/shop/shop", "", authed)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"name":"shop-web"`) {
+		t.Fatalf("rollouts: %d %s", rec.Code, rec.Body)
+	}
+	rec = do(s, "POST", "/api/deployments/shop/web/rollback", `{"revision":4}`, authed)
+	if rec.Code != http.StatusOK || fc.rolledBack != "shop/web@4 by me@example.com" {
+		t.Fatalf("rollback: %d %q", rec.Code, fc.rolledBack)
+	}
+	if rec := do(s, "POST", "/api/deployments/shop/web/rollback", `{"revision":-1}`, authed); rec.Code != http.StatusBadRequest {
+		t.Fatalf("negative revision: %d", rec.Code)
+	}
+	ro, fc2, _, _ := newServer(Options{AuthHeader: "X-Forwarded-Email"})
+	if rec := do(ro, "POST", "/api/deployments/shop/web/rollback", `{}`, authed); rec.Code != http.StatusForbidden || fc2.rolledBack != "" {
+		t.Fatalf("read-only rollback: %d", rec.Code)
 	}
 }

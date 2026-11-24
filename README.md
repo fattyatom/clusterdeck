@@ -2,22 +2,23 @@
 
 A small, self-hosted dashboard for a Kubernetes or k3s cluster. It covers the
 parts a GitOps setup leaves without a page: **how loaded the cluster is, which
-apps are unhealthy, whether the backups ran, and a guarded button to restore
-one**.
+apps are unhealthy, how each rollout went, whether the backups ran, and
+guarded buttons to roll back or restore**.
 
 clusterdeck is not a deploy tool. Argo CD, Flux or `kubectl apply` stay in
-charge of what runs. clusterdeck reads the cluster and runs a few Jobs, so it
-never fights your GitOps controller.
+charge of what runs. clusterdeck reads the cluster, runs a few Jobs, and rolls
+a Deployment back only where your GitOps controller will not undo it.
 
 | Tab | What it shows | Where the data comes from |
 |---|---|---|
 | Overview | Node readiness, CPU and memory now, pod phases, recent warning events | Kubernetes API, metrics-server |
 | Apps | Workloads grouped by `app.kubernetes.io/name`, ready replicas, restarts, pods, logs, Argo CD sync and health | Kubernetes API, Argo CD `Application`s (optional) |
+| App → Rollouts | Per Deployment: a Synced → Rolled out → Available → Healthy pipeline, the last 10 revisions with their images, Argo CD sync history, **Roll back** to any revision, and opt-in **auto-rollback** | Deployments, ReplicaSets, pods, Argo CD `Application`s |
 | Backups | Every backup and restore-check CronJob: health, last success, next run, last 5 runs, **Run now** | CronJobs and Jobs you label |
 | Restore | Restore templates with typed parameters and a typed confirmation | ConfigMaps you label |
 | Load | CPU, memory and restarts by node and namespace over 1h to 7d | SigNoz or Prometheus (optional) |
 
-Actions (Run now, Restore, Rolling restart) are **off by default**. When they
+Actions (Run now, Restore, Rolling restart, Roll back) are **off by default**. When they
 are on, every action is logged as JSON with the user who asked.
 
 ## Install
@@ -72,6 +73,53 @@ undeclared parameters, and only accepts parameter values made of
 Keeping the Job inside a ConfigMap means your GitOps tool syncs the template,
 never the destructive Job itself.
 
+## Rollouts and rollback
+
+Each Deployment of an app gets a pipeline:
+
+| Stage | Done when | Fails when |
+|---|---|---|
+| Synced (Argo CD) or Applied | Argo CD reports `Synced` | |
+| Rolled out | Every replica runs the newest revision | The progress deadline passes, or a new pod is in `CrashLoopBackOff`, `ImagePullBackOff`, `ErrImagePull`, `CreateContainerConfigError`, `CreateContainerError` or `InvalidImageName` |
+| Available | Every replica is available | the rollout failed |
+| Healthy | No new pod has a problem, and Argo CD (if any) reports `Healthy` | a new pod has one of the problems above |
+
+**Roll back** does what `kubectl rollout undo` does: it puts an earlier
+ReplicaSet's pod template back on the Deployment, and records a Kubernetes
+Event saying who did it. Whether it is offered depends on who owns the
+Deployment:
+
+| Owner | Rollback |
+|---|---|
+| Nothing (plain `kubectl`, Helm) | Offered |
+| Argo CD, manual sync | Offered |
+| Argo CD, auto-sync without self-heal | Offered, with a warning: Argo CD shows the app `OutOfSync` and re-applies git on the next change |
+| Argo CD, auto-sync **with self-heal** | **Refused**: Argo CD would undo it within seconds. The page names the git revision to revert instead |
+
+clusterdeck finds the owning Argo CD Application from the
+`argocd.argoproj.io/tracking-id` annotation, then the
+`app.kubernetes.io/instance` label, then the Application deploying to the
+Deployment's namespace.
+
+**Auto-rollback** is opt-in twice: the install needs
+`actions.autoRollback.enabled: true`, and each Deployment needs
+
+```yaml
+metadata:
+  annotations:
+    clusterdeck.io/auto-rollback: "true"
+    clusterdeck.io/rollback-grace: 5m
+```
+
+Every 30 s, clusterdeck rolls a Deployment back to its previous revision when
+the newest revision has failed (see the table above) for longer than the grace
+period (default 5m), or at once when its progress deadline has passed. It never
+rolls back a revision that is itself an auto-rollback, so a bad previous
+revision cannot cause a loop: it stops and waits for a person. It records what
+it did in `clusterdeck.io/auto-rollback-from`, `-to` and `-at` annotations, a
+Warning Event and a log line. Only Deployments are covered; StatefulSets and
+DaemonSets are not.
+
 ## Health of a backup
 
 | Health | Meaning |
@@ -105,6 +153,8 @@ The binary reads environment variables; the chart sets them from values.
 | `KUBECONFIG` | in-cluster config |
 | `AUTH_HEADER`, `AUTH_ALLOWED_USERS` | empty: anonymous, read-only |
 | `ACTIONS_ENABLED` | `false`; needs `AUTH_HEADER` |
+| `ACTIONS_NAMESPACES` | empty: all namespaces (auto-rollback scope; the chart also scopes RBAC to it) |
+| `AUTO_ROLLBACK_ENABLED`, `AUTO_ROLLBACK_INTERVAL` | `false`, `30s`; needs `ACTIONS_ENABLED` |
 | `HIDE_NAMESPACES` | `kube-system,kube-public,kube-node-lease` (Apps tab only) |
 | `BACKUP_SELECTOR`, `RESTORE_CHECK_SELECTOR`, `RESTORE_TEMPLATE_SELECTOR` | `clusterdeck.io/role=...` |
 | `METRICS_PROVIDER` | `none` |
@@ -113,14 +163,18 @@ The binary reads environment variables; the chart sets them from values.
 
 ## Develop
 
+The UI is Svelte 5, built by Vite into `web/dist`, which the Go binary embeds.
+Build it before any Go command:
+
 ```bash
-go test ./...
-node --test web/lib.test.mjs
-go run ./hack/demo
+make test
+make demo
 ```
 
-`hack/demo` serves the real UI against a fake cluster on `:8099`, with actions
-on. Run it from the repository root.
+`make demo` serves the real UI against a fake cluster on `:8099` with actions
+on, including a failing rollout, an Argo CD self-healed app and an
+auto-rollback record. For UI work, run it and `npm run dev` in `frontend/`
+(Vite proxies `/api` to the demo).
 
 ## Design and alternatives
 

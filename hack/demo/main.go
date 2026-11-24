@@ -93,13 +93,38 @@ func main() {
 			Status: appsv1.DeploymentStatus{ReadyReplicas: ready},
 		}
 	}
+	revisioned := func(d *appsv1.Deployment, rev int64, ann map[string]string) *appsv1.Deployment {
+		d.UID = types.UID(d.Namespace + "-" + d.Name)
+		d.Annotations = map[string]string{kube.AnnRevision: strconv.FormatInt(rev, 10)}
+		for k, v := range ann {
+			d.Annotations[k] = v
+		}
+		d.Status.UpdatedReplicas = d.Status.ReadyReplicas
+		d.Status.AvailableReplicas = d.Status.ReadyReplicas
+		d.Status.Replicas = *d.Spec.Replicas
+		return d
+	}
+	replicaSet := func(d *appsv1.Deployment, rev int64, image string, age time.Duration, ready int32) *appsv1.ReplicaSet {
+		hash := d.Name + "h" + strconv.FormatInt(rev, 10)
+		tmpl := d.Spec.Template.DeepCopy()
+		tmpl.Labels["pod-template-hash"] = hash
+		tmpl.Spec.Containers[0].Image = image
+		return &appsv1.ReplicaSet{
+			ObjectMeta: metav1.ObjectMeta{Name: d.Name + "-" + hash, Namespace: d.Namespace, CreationTimestamp: ago(age),
+				Labels:          map[string]string{"pod-template-hash": hash},
+				Annotations:     map[string]string{kube.AnnRevision: strconv.FormatInt(rev, 10)},
+				OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: d.Name, UID: d.UID}}},
+			Spec:   appsv1.ReplicaSetSpec{Template: *tmpl},
+			Status: appsv1.ReplicaSetStatus{Replicas: ready, ReadyReplicas: ready},
+		}
+	}
 	pod := func(ns, name, owner, node string, ready bool, restarts int32) *corev1.Pod {
 		st := corev1.ConditionTrue
 		if !ready {
 			st = corev1.ConditionFalse
 		}
 		return &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: map[string]string{"pod": owner}},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: map[string]string{"pod": owner, "pod-template-hash": owner + "h" + map[string]string{"web": "3", "worker": "2", "server": "5", "api": "8"}[owner]}},
 			Spec:       corev1.PodSpec{NodeName: node, Containers: []corev1.Container{{Name: owner}}},
 			Status: corev1.PodStatus{
 				Phase:             corev1.PodRunning,
@@ -139,12 +164,25 @@ func main() {
 		Data: map[string]string{kube.TemplateKey: "apiVersion: batch/v1\nkind: Job\nmetadata:\n  generateName: shop-restore-\nspec:\n  template:\n    spec:\n      restartPolicy: Never\n      containers:\n        - name: r\n          image: postgres:16\n          env:\n            - {name: DUMP, value: \"\"}\n"},
 	}
 
+	webDep := revisioned(dep("shop", "web", "shop", 2, 2), 3, nil)
+	worker := revisioned(dep("shop", "worker", "shop", 1, 1), 2, nil)
+	srv := revisioned(dep("photos", "server", "photos", 0, 1), 5, map[string]string{kube.AnnAutoRollback: "true"})
+	srv.Status.UpdatedReplicas = 1
+	api := revisioned(dep("blog", "api", "blog", 1, 1), 8, map[string]string{kube.AnnAutoRollback: "true", kube.AnnAutoRollbackFrom: "7", kube.AnnAutoRollbackTo: "8", kube.AnnAutoRollbackAt: now.Add(-40 * time.Minute).UTC().Format(time.RFC3339)})
+	badPod := pod("photos", "server-6b8-pqrst", "server", "agent-1", false, 14)
+	badPod.Status.ContainerStatuses[0].State.Waiting = &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}
+
 	cs := fake.NewSimpleClientset(
 		node("server-1", "control-plane", true), node("server-2", "control-plane", true), node("agent-1", "worker", false),
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "shop"}}, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "photos"}},
-		dep("shop", "web", "shop", 2, 2), dep("shop", "worker", "shop", 1, 1), dep("photos", "server", "photos", 0, 1),
+		webDep, worker, srv, api,
+		replicaSet(webDep, 1, "ghcr.io/example/web:1.3.0", 9*24*time.Hour, 0), replicaSet(webDep, 2, "ghcr.io/example/web:1.4.1", 3*24*time.Hour, 0), replicaSet(webDep, 3, "ghcr.io/example/web:1.4.2", 5*time.Hour, 2),
+		replicaSet(worker, 1, "ghcr.io/example/worker:1.4.1", 3*24*time.Hour, 0), replicaSet(worker, 2, "ghcr.io/example/worker:1.4.2", 5*time.Hour, 1),
+		replicaSet(srv, 4, "ghcr.io/example/server:2.0.0", 6*24*time.Hour, 0), replicaSet(srv, 5, "ghcr.io/example/server:2.1.0", 25*time.Minute, 0),
+		replicaSet(api, 6, "ghcr.io/example/api:0.9.0", 2*24*time.Hour, 0), replicaSet(api, 7, "ghcr.io/example/api:1.0.0-rc1", 45*time.Minute, 0), replicaSet(api, 8, "ghcr.io/example/api:0.9.0", 40*time.Minute, 1),
+		pod("blog", "api-77f-uvwxy", "api", "server-2", true, 0), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "blog"}},
 		pod("shop", "web-7d9f-abcde", "web", "server-1", true, 0), pod("shop", "web-7d9f-fghij", "web", "server-2", true, 0),
-		pod("shop", "worker-5c4-klmno", "worker", "server-1", true, 2), pod("photos", "server-6b8-pqrst", "server", "agent-1", false, 14),
+		pod("shop", "worker-5c4-klmno", "worker", "server-1", true, 2), badPod,
 		dbBackup, files, check, photos,
 		job(dbBackup, "db-backup-1", 3*time.Hour, batchv1.JobComplete), job(dbBackup, "db-backup-2", 2*time.Hour, batchv1.JobComplete), job(dbBackup, "db-backup-3", 43*time.Minute, batchv1.JobComplete),
 		job(files, "storage-backup-1", 20*time.Hour, batchv1.JobComplete),
@@ -172,12 +210,20 @@ func main() {
 			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "metrics.k8s.io/v1beta1", "kind": "NodeMetrics",
 				"metadata": map[string]any{"name": name}, "usage": map[string]any{"cpu": use[0], "memory": use[1]}}}, "")
 	}
-	for ns, st := range map[string][2]string{"shop": {"Synced", "Healthy"}, "photos": {"OutOfSync", "Degraded"}} {
+	for ns, st := range map[string][3]string{"shop": {"Synced", "Healthy", "auto"}, "photos": {"Synced", "Degraded", "heal"}} {
+		automated := map[string]any{"prune": true}
+		if st[2] == "heal" {
+			automated["selfHeal"] = true
+		}
 		dyn.Tracker().Create(schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"},
 			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "argoproj.io/v1alpha1", "kind": "Application",
 				"metadata": map[string]any{"name": ns, "namespace": "argocd"},
-				"spec":     map[string]any{"destination": map[string]any{"namespace": ns}},
-				"status":   map[string]any{"sync": map[string]any{"status": st[0], "revision": "3f2a9c1"}, "health": map[string]any{"status": st[1]}}}}, "argocd")
+				"spec":     map[string]any{"destination": map[string]any{"namespace": ns}, "syncPolicy": map[string]any{"automated": automated}},
+				"status": map[string]any{"sync": map[string]any{"status": st[0], "revision": "3f2a9c1e5b7d"}, "health": map[string]any{"status": st[1]},
+					"history": []any{
+						map[string]any{"id": int64(11), "revision": "8d0e4b2aa1c3", "deployedAt": now.Add(-3 * 24 * time.Hour).UTC().Format(time.RFC3339)},
+						map[string]any{"id": int64(12), "revision": "3f2a9c1e5b7d", "deployedAt": now.Add(-5 * time.Hour).UTC().Format(time.RFC3339)},
+					}}}}, "argocd")
 	}
 
 	cluster, err := kube.New(cs, dyn, kube.Options{
@@ -188,7 +234,7 @@ func main() {
 		log.Fatal(err)
 	}
 	h := server.New(cluster, wave{}, server.Options{
-		ClusterName: "demo-cluster", AuthHeader: "X-Forwarded-Email", ActionsEnabled: true,
+		ClusterName: "demo-cluster", AuthHeader: "X-Forwarded-Email", ActionsEnabled: true, AutoRollback: true,
 		Static: web.FS(), Logger: slog.New(slog.NewTextHandler(os.Stderr, nil)),
 	})
 	addr := ":8099"

@@ -70,6 +70,7 @@ func run(logger *slog.Logger) error {
 		AuthHeader:     cfg.AuthHeader,
 		AllowedUsers:   cfg.AllowedUsers,
 		ActionsEnabled: cfg.ActionsEnabled,
+		AutoRollback:   cfg.AutoRollback,
 		Static:         web.FS(),
 		Logger:         logger,
 	})
@@ -83,11 +84,33 @@ func run(logger *slog.Logger) error {
 		defer cancel()
 		srv.Shutdown(shutdown)
 	}()
+	if cfg.AutoRollback {
+		go autoRollback(ctx, cluster, cfg.ActionsNamespaces, cfg.AutoRollbackInterval, logger)
+	}
 	logger.Info("listening", "addr", cfg.ListenAddr, "metrics", provider.Name(), "actions", cfg.ActionsEnabled)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
+}
+
+func autoRollback(ctx context.Context, cluster *kube.Client, namespaces []string, every time.Duration, logger *slog.Logger) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		results, err := cluster.AutoRollback(ctx, namespaces)
+		for _, r := range results {
+			logger.Warn("auto rollback", "user", "clusterdeck", "namespace", r.Namespace, "deployment", r.Name, "from", r.From, "to", r.To, "reason", r.Reason)
+		}
+		if err != nil {
+			logger.Error("auto rollback check failed", "error", err.Error())
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func restConfig(kubeconfig string) (*rest.Config, error) {

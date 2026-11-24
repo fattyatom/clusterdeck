@@ -12,6 +12,9 @@ auth:
 actions:
   enabled: false
   namespaces: []
+  autoRollback:
+    enabled: false
+    interval: 30s
 
 hideNamespaces: [kube-system, kube-public, kube-node-lease]
 

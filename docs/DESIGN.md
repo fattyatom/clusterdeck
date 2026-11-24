@@ -12,9 +12,10 @@ telemetry UI and a runbook.
 clusterdeck is that page and nothing else. Three rules keep it small:
 
 1. **It never deploys.** Git and the GitOps controller own desired state.
-   Anything clusterdeck changes is either a new Job (backup, restore) or the
-   same `restartedAt` annotation that `kubectl rollout restart` and Argo CD's
-   own restart action write.
+   Anything clusterdeck changes is a new Job (backup, restore), the
+   `restartedAt` annotation that `kubectl rollout restart` and Argo CD's own
+   restart action write, or a rollback to a pod template the cluster already
+   ran. It refuses a rollback the GitOps controller would undo.
 2. **It never stores anything.** No database, no PVC. State comes from the
    Kubernetes API and an optional metrics backend on every request.
 3. **Conventions are labels.** Backups are CronJobs, restores are Job
@@ -59,8 +60,9 @@ cluster. The break-glass path stays `kubectl`.
   Never Secrets. Pod logs and ConfigMaps can still hold sensitive values, so
   treat access to the UI like access to `kubectl` with the `view` role.
 - Write access exists only when `actions.enabled` is true: `create` on Jobs
-  and `patch` on Deployments, StatefulSets and DaemonSets, cluster-wide or
-  only in `actions.namespaces`.
+  and Events, `patch` on Deployments, StatefulSets and DaemonSets, and
+  `update` on Deployments (rollback), cluster-wide or only in
+  `actions.namespaces`.
 - Creating a Job in a namespace means running a pod with that namespace's
   service accounts and Secrets. That is why clusterdeck only runs a Job that
   someone has already declared: a CronJob carrying the backup label, or a
@@ -70,6 +72,14 @@ cluster. The break-glass path stays `kubectl`.
   NetworkPolicy so nothing else can reach the pod and forge it.
 - Actions need an identified user and a same-origin request header, and are
   logged as JSON (`"msg":"action"`) with the user, path and result.
+
+## Rollback and GitOps
+
+A rollback in the cluster and a rollback in git are different things. With
+Argo CD self-heal on, only the second one sticks, so clusterdeck refuses the
+first and shows which git revision to revert. A rollback that opens a revert
+pull request would serve self-healed apps, at the cost of a git token. It is
+not built.
 
 ## Not yet
 
@@ -81,3 +91,6 @@ cluster. The break-glass path stays `kubectl`.
 - Built-in OIDC for clusters without an auth proxy.
 - Velero and CloudNativePG `Backup` resources as backup sources, beside
   CronJobs.
+- Rollback for StatefulSets and DaemonSets (ControllerRevisions).
+- Health from telemetry (error rate or latency in SigNoz) as an auto-rollback
+  signal, beside pod state.

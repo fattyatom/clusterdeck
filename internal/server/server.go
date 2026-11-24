@@ -26,6 +26,8 @@ type Cluster interface {
 	RunCronJob(ctx context.Context, ns, name, user string) (string, error)
 	RunRestore(ctx context.Context, ns, name string, params map[string]string, confirm, user string) (string, error)
 	RestartWorkload(ctx context.Context, ns, kind, name string) error
+	Rollouts(ctx context.Context, ns, app string) ([]kube.Rollout, error)
+	Rollback(ctx context.Context, ns, name string, toRevision int64, user string) (string, error)
 }
 
 type Options struct {
@@ -33,6 +35,7 @@ type Options struct {
 	AuthHeader     string
 	AllowedUsers   []string
 	ActionsEnabled bool
+	AutoRollback   bool
 	Static         fs.FS
 	Logger         *slog.Logger
 	Now            func() time.Time
@@ -81,6 +84,8 @@ func New(cluster Cluster, provider metrics.Provider, opts Options) *Server {
 	s.mux.Handle("GET /api/restores", s.read(s.handleRestores))
 	s.mux.Handle("GET /api/metrics/{panel}", s.read(s.handleMetrics))
 	s.mux.Handle("GET /api/pods/{ns}/{pod}/logs", s.read(s.handleLogs))
+	s.mux.Handle("GET /api/rollouts/{ns}/{app}", s.read(s.handleRollouts))
+	s.mux.Handle("POST /api/deployments/{ns}/{name}/rollback", s.action(s.handleRollback))
 	s.mux.Handle("POST /api/cronjobs/{ns}/{name}/run", s.action(s.handleRunCronJob))
 	s.mux.Handle("POST /api/restores/{ns}/{name}/run", s.action(s.handleRunRestore))
 	s.mux.Handle("POST /api/workloads/{ns}/{kind}/{name}/restart", s.action(s.handleRestart))
@@ -197,6 +202,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) error {
 		"user":            userFrom(r),
 		"actionsEnabled":  s.opts.ActionsEnabled && userFrom(r) != anonymous,
 		"metricsProvider": s.metrics.Name(),
+		"autoRollback":    s.opts.AutoRollback,
 		"panels":          metrics.Panels,
 	})
 	return nil
@@ -273,6 +279,28 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Cache-Control", "no-store")
 	_, err = w.Write([]byte(logs))
 	return err
+}
+
+func (s *Server) handleRollouts(w http.ResponseWriter, r *http.Request) error {
+	rollouts, err := s.cluster.Rollouts(r.Context(), r.PathValue("ns"), r.PathValue("app"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, rollouts)
+	return nil
+}
+
+func (s *Server) handleRollback(_ http.ResponseWriter, r *http.Request) (string, error) {
+	var body struct {
+		Revision int64 `json:"revision"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		return "", errors.Join(kube.ErrInvalid, err)
+	}
+	if body.Revision < 0 {
+		return "", errors.Join(kube.ErrInvalid, errors.New("revision must be 0 (previous) or a revision number"))
+	}
+	return s.cluster.Rollback(r.Context(), r.PathValue("ns"), r.PathValue("name"), body.Revision, userFrom(r))
 }
 
 func (s *Server) handleRunCronJob(_ http.ResponseWriter, r *http.Request) (string, error) {

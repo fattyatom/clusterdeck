@@ -20,7 +20,7 @@ export function fmtCores(milli) {
 
 export function fmtValue(v, unit) {
   if (unit === "bytes") return fmtBytes(v);
-  if (unit === "cores") return fmtCores(v * 1000);
+  if (unit === "cores") return fmtCores(v == null ? v : v * 1000);
   if (v == null || !Number.isFinite(v)) return "–";
   return Number.isInteger(v) ? String(v) : v.toFixed(2);
 }
@@ -30,14 +30,13 @@ export function fmtAgo(iso, now = Date.now()) {
   const t = typeof iso === "number" ? iso : Date.parse(iso);
   if (!Number.isFinite(t)) return "–";
   const s = Math.round((now - t) / 1000);
-  const future = s < 0;
   const a = Math.abs(s);
   let out;
   if (a < 60) out = `${a}s`;
   else if (a < 3600) out = `${Math.floor(a / 60)}m`;
   else if (a < 86400) out = `${Math.floor(a / 3600)}h`;
   else out = `${Math.floor(a / 86400)}d`;
-  return future ? `in ${out}` : `${out} ago`;
+  return s < 0 ? `in ${out}` : `${out} ago`;
 }
 
 export function pct(used, total) {
@@ -47,27 +46,36 @@ export function pct(used, total) {
 
 const TONES = {
   ok: "good",
-  Ready: "good",
-  NotReady: "bad",
-  cordoned: "warn",
   succeeded: "good",
   Healthy: "good",
   Synced: "good",
+  Ready: "good",
+  complete: "good",
+  done: "good",
   running: "info",
+  progressing: "info",
+  Progressing: "info",
+  active: "info",
   pending: "muted",
+  paused: "muted",
   suspended: "muted",
   unknown: "muted",
   stale: "warn",
   OutOfSync: "warn",
-  Progressing: "info",
+  cordoned: "warn",
   failed: "bad",
   never: "bad",
   Degraded: "bad",
   Missing: "bad",
+  NotReady: "bad",
 };
 
 export function tone(status) {
   return TONES[status] ?? "muted";
+}
+
+export function shortRev(rev) {
+  return rev ? rev.slice(0, 7) : "–";
 }
 
 export function bounds(series) {
@@ -97,20 +105,21 @@ export function linePath(points, b, width, height) {
     .join(" ");
 }
 
-export function flatChildren(children) {
-  return children.flat(Infinity).filter((c) => c != null && c !== false);
+export function parseRoute(hash) {
+  const parts = (hash || "").replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  const view = parts[0] || "overview";
+  if (view === "apps" && parts.length === 3) return { view: "app", namespace: parts[1], app: parts[2] };
+  if (["overview", "apps", "backups", "load"].includes(view)) return { view };
+  return { view: "overview" };
 }
 
-export function h(tag, attrs = {}, ...children) {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v == null || v === false) continue;
-    if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
-    else if (k === "class") el.className = v;
-    else el.setAttribute(k, v === true ? "" : v);
-  }
-  for (const c of flatChildren(children)) {
-    el.append(c instanceof Node ? c : String(c));
-  }
-  return el;
+export function appHref(namespace, app) {
+  return `#apps/${encodeURIComponent(namespace)}/${encodeURIComponent(app)}`;
+}
+
+export function autoRollbackText(rollout, enabledInstall) {
+  if (!enabledInstall) return "Auto-rollback is off for this clusterdeck install.";
+  if (!rollout.rollback.auto) return 'Auto-rollback is off. Annotate the Deployment with clusterdeck.io/auto-rollback: "true" to turn it on.';
+  if (!rollout.rollback.allowed) return "Auto-rollback is on, but cannot act, for the reason above.";
+  return `Auto-rollback is on: a failing revision is rolled back after ${rollout.rollback.grace}, or as soon as its progress deadline passes.`;
 }

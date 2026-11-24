@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -14,6 +15,9 @@ type Config struct {
 	AuthHeader              string
 	AllowedUsers            []string
 	ActionsEnabled          bool
+	ActionsNamespaces       []string
+	AutoRollback            bool
+	AutoRollbackInterval    time.Duration
 	HideNamespaces          []string
 	BackupSelector          string
 	RestoreCheckSelector    string
@@ -38,6 +42,7 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 		Kubeconfig:              get("KUBECONFIG", ""),
 		AuthHeader:              get("AUTH_HEADER", ""),
 		AllowedUsers:            list(get("AUTH_ALLOWED_USERS", "")),
+		ActionsNamespaces:       list(get("ACTIONS_NAMESPACES", "")),
 		HideNamespaces:          list(get("HIDE_NAMESPACES", "kube-system,kube-public,kube-node-lease")),
 		BackupSelector:          get("BACKUP_SELECTOR", "clusterdeck.io/role=backup"),
 		RestoreCheckSelector:    get("RESTORE_CHECK_SELECTOR", "clusterdeck.io/role=restore-check"),
@@ -51,6 +56,15 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 	var err error
 	if c.ActionsEnabled, err = strconv.ParseBool(get("ACTIONS_ENABLED", "false")); err != nil {
 		return nil, fmt.Errorf("ACTIONS_ENABLED: %w", err)
+	}
+	if c.AutoRollback, err = strconv.ParseBool(get("AUTO_ROLLBACK_ENABLED", "false")); err != nil {
+		return nil, fmt.Errorf("AUTO_ROLLBACK_ENABLED: %w", err)
+	}
+	if c.AutoRollbackInterval, err = time.ParseDuration(get("AUTO_ROLLBACK_INTERVAL", "30s")); err != nil || c.AutoRollbackInterval < 10*time.Second {
+		return nil, fmt.Errorf("AUTO_ROLLBACK_INTERVAL must be a duration of at least 10s")
+	}
+	if c.AutoRollback && !c.ActionsEnabled {
+		return nil, fmt.Errorf("AUTO_ROLLBACK_ENABLED=true needs ACTIONS_ENABLED=true")
 	}
 	if c.ActionsEnabled && c.AuthHeader == "" {
 		return nil, fmt.Errorf("ACTIONS_ENABLED=true needs AUTH_HEADER: actions are only allowed for an identified user")

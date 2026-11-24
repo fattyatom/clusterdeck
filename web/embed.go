@@ -5,7 +5,13 @@ import (
 	"io/fs"
 )
 
-//go:embed index.html app.js lib.js style.css
+//go:embed all:dist
 var files embed.FS
 
-func FS() fs.FS { return files }
+func FS() fs.FS {
+	sub, err := fs.Sub(files, "dist")
+	if err != nil {
+		panic(err)
+	}
+	return sub
+}

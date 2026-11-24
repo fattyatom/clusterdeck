@@ -8,7 +8,7 @@ rules:
     resources: [nodes, namespaces, pods, pods/log, events, configmaps]
     verbs: [get, list, watch]
   - apiGroups: [apps]
-    resources: [deployments, statefulsets, daemonsets]
+    resources: [deployments, statefulsets, daemonsets, replicasets]
     verbs: [get, list, watch]
   - apiGroups: [batch]
     resources: [jobs, cronjobs]
@@ -45,8 +45,14 @@ rules:
     resources: [jobs]
     verbs: [create]
   - apiGroups: [apps]
-    resources: [deployments, statefulsets, daemonsets]
+    resources: [statefulsets, daemonsets]
     verbs: [patch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [patch, update]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create]
 {{- if .Values.actions.namespaces }}
 {{- range .Values.actions.namespaces }}
 ---

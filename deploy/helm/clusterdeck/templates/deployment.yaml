@@ -1,3 +1,6 @@
+{{- if and .Values.actions.autoRollback.enabled (not .Values.actions.enabled) }}
+{{- fail "actions.autoRollback.enabled needs actions.enabled" }}
+{{- end }}
 {{- if and .Values.actions.enabled (not .Values.auth.header) }}
 {{- fail "actions.enabled needs auth.header: actions are only allowed for an identified user" }}
 {{- end }}
@@ -31,6 +34,9 @@ spec:
             - {name: AUTH_HEADER, value: {{ .Values.auth.header | quote }}}
             - {name: AUTH_ALLOWED_USERS, value: {{ join "," .Values.auth.allowedUsers | quote }}}
             - {name: ACTIONS_ENABLED, value: {{ .Values.actions.enabled | quote }}}
+            - {name: ACTIONS_NAMESPACES, value: {{ join "," .Values.actions.namespaces | quote }}}
+            - {name: AUTO_ROLLBACK_ENABLED, value: {{ .Values.actions.autoRollback.enabled | quote }}}
+            - {name: AUTO_ROLLBACK_INTERVAL, value: {{ .Values.actions.autoRollback.interval | quote }}}
             - {name: HIDE_NAMESPACES, value: {{ join "," .Values.hideNamespaces | quote }}}
             - {name: BACKUP_SELECTOR, value: {{ .Values.selectors.backup | quote }}}
             - {name: RESTORE_CHECK_SELECTOR, value: {{ .Values.selectors.restoreCheck | quote }}}
