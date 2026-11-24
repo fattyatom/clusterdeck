@@ -1,0 +1,84 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "clusterdeck.fullname" . }}-read
+  labels: {{- include "clusterdeck.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [nodes, namespaces, pods, pods/log, events, configmaps]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: [metrics.k8s.io]
+    resources: [nodes, pods]
+    verbs: [get, list]
+  - apiGroups: [argoproj.io]
+    resources: [applications]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "clusterdeck.fullname" . }}-read
+  labels: {{- include "clusterdeck.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "clusterdeck.fullname" . }}-read
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "clusterdeck.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+{{- if .Values.actions.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "clusterdeck.fullname" . }}-actions
+  labels: {{- include "clusterdeck.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [patch]
+{{- if .Values.actions.namespaces }}
+{{- range .Values.actions.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "clusterdeck.fullname" $ }}-actions
+  namespace: {{ . }}
+  labels: {{- include "clusterdeck.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "clusterdeck.fullname" $ }}-actions
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "clusterdeck.fullname" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- else }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "clusterdeck.fullname" . }}-actions
+  labels: {{- include "clusterdeck.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "clusterdeck.fullname" . }}-actions
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "clusterdeck.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

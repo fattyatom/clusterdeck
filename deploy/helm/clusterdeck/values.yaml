@@ -1,0 +1,50 @@
+image:
+  repository: ghcr.io/fattyatom/clusterdeck
+  tag: ""
+  pullPolicy: IfNotPresent
+
+clusterName: cluster
+
+auth:
+  header: ""
+  allowedUsers: []
+
+actions:
+  enabled: false
+  namespaces: []
+
+hideNamespaces: [kube-system, kube-public, kube-node-lease]
+
+selectors:
+  backup: clusterdeck.io/role=backup
+  restoreCheck: clusterdeck.io/role=restore-check
+  restoreTemplate: clusterdeck.io/role=restore-template
+
+metrics:
+  provider: none
+  signoz:
+    url: ""
+    filter: ""
+    existingSecret: ""
+    secretKey: api-key
+  prometheus:
+    url: ""
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tls: []
+
+networkPolicy:
+  enabled: false
+  ingressFromNamespaces: []
+
+resources:
+  requests: {cpu: 10m, memory: 32Mi}
+  limits: {memory: 128Mi}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

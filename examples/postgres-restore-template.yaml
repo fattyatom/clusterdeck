@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: restore-db
+  labels:
+    clusterdeck.io/role: restore-template
+  annotations:
+    clusterdeck.io/app: shop
+    clusterdeck.io/description: >-
+      Wipes the shop database and restores a dump. Scale the web deployment to
+      0 first. DUMP is a file name in the backup volume; empty means the newest.
+    clusterdeck.io/params: DUMP
+data:
+  job.yaml: |
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      generateName: shop-restore-db-
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: restore
+              image: postgres:16
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  f="/backups/${DUMP:-$(ls -1 /backups | grep '^shop-.*\.dump$' | sort | tail -n 1)}"
+                  [ -f "$f" ] || { echo "no dump at $f"; exit 1; }
+                  pg_restore --clean --if-exists --no-owner --exit-on-error -d shop "$f"
+              env:
+                - {name: DUMP, value: ""}
+                - {name: PGHOST, value: shop-db}
+                - name: PGPASSWORD
+                  valueFrom: {secretKeyRef: {name: shop-db, key: password}}
+              volumeMounts:
+                - {name: backups, mountPath: /backups, readOnly: true}
+          volumes:
+            - name: backups
+              persistentVolumeClaim: {claimName: shop-backups}

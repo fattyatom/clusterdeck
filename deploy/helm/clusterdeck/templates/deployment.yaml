@@ -1,0 +1,68 @@
+{{- if and .Values.actions.enabled (not .Values.auth.header) }}
+{{- fail "actions.enabled needs auth.header: actions are only allowed for an identified user" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "clusterdeck.fullname" . }}
+  labels: {{- include "clusterdeck.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "clusterdeck.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "clusterdeck.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "clusterdeck.fullname" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: clusterdeck
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - {name: CLUSTER_NAME, value: {{ .Values.clusterName | quote }}}
+            - {name: AUTH_HEADER, value: {{ .Values.auth.header | quote }}}
+            - {name: AUTH_ALLOWED_USERS, value: {{ join "," .Values.auth.allowedUsers | quote }}}
+            - {name: ACTIONS_ENABLED, value: {{ .Values.actions.enabled | quote }}}
+            - {name: HIDE_NAMESPACES, value: {{ join "," .Values.hideNamespaces | quote }}}
+            - {name: BACKUP_SELECTOR, value: {{ .Values.selectors.backup | quote }}}
+            - {name: RESTORE_CHECK_SELECTOR, value: {{ .Values.selectors.restoreCheck | quote }}}
+            - {name: RESTORE_TEMPLATE_SELECTOR, value: {{ .Values.selectors.restoreTemplate | quote }}}
+            - {name: METRICS_PROVIDER, value: {{ .Values.metrics.provider | quote }}}
+            {{- if eq .Values.metrics.provider "signoz" }}
+            - {name: SIGNOZ_URL, value: {{ required "metrics.signoz.url is required" .Values.metrics.signoz.url | quote }}}
+            - {name: SIGNOZ_FILTER, value: {{ .Values.metrics.signoz.filter | quote }}}
+            - name: SIGNOZ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "metrics.signoz.existingSecret is required" .Values.metrics.signoz.existingSecret }}
+                  key: {{ .Values.metrics.signoz.secretKey }}
+            {{- end }}
+            {{- if eq .Values.metrics.provider "prometheus" }}
+            - {name: PROMETHEUS_URL, value: {{ required "metrics.prometheus.url is required" .Values.metrics.prometheus.url | quote }}}
+            {{- end }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

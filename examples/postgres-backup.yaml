@@ -1,0 +1,71 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+  labels:
+    app.kubernetes.io/name: shop
+    clusterdeck.io/role: backup
+  annotations:
+    clusterdeck.io/description: Hourly pg_dump to the backup volume
+spec:
+  schedule: "17 * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: postgres:16
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  f="/backups/shop-$(date -u +%Y%m%dT%H%MZ).dump"
+                  pg_dump -Fc -f "$f.tmp" && pg_restore -l "$f.tmp" > /dev/null && mv "$f.tmp" "$f"
+              env:
+                - {name: PGHOST, value: shop-db}
+                - name: PGPASSWORD
+                  valueFrom: {secretKeyRef: {name: shop-db, key: password}}
+              volumeMounts:
+                - {name: backups, mountPath: /backups}
+          volumes:
+            - name: backups
+              persistentVolumeClaim: {claimName: shop-backups}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-restore-check
+  labels:
+    app.kubernetes.io/name: shop
+    clusterdeck.io/role: restore-check
+  annotations:
+    clusterdeck.io/description: Monthly restore of the newest dump into a scratch database
+spec:
+  schedule: "43 5 1 * *"
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: check
+              image: postgres:16
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  f=$(ls -1 /backups/shop-*.dump | sort | tail -n 1)
+                  createdb restore_check && pg_restore -d restore_check "$f"; rc=$?
+                  dropdb restore_check; exit $rc
+              env:
+                - {name: PGHOST, value: shop-db}
+                - name: PGPASSWORD
+                  valueFrom: {secretKeyRef: {name: shop-db, key: password}}
+              volumeMounts:
+                - {name: backups, mountPath: /backups, readOnly: true}
+          volumes:
+            - name: backups
+              persistentVolumeClaim: {claimName: shop-backups}

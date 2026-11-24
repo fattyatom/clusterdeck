@@ -1,0 +1,84 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+)
+
+type Config struct {
+	ListenAddr              string
+	ClusterName             string
+	Kubeconfig              string
+	AuthHeader              string
+	AllowedUsers            []string
+	ActionsEnabled          bool
+	HideNamespaces          []string
+	BackupSelector          string
+	RestoreCheckSelector    string
+	RestoreTemplateSelector string
+	MetricsProvider         string
+	SigNozURL               string
+	SigNozAPIKey            string
+	SigNozFilter            string
+	PrometheusURL           string
+}
+
+func FromEnv(getenv func(string) string) (*Config, error) {
+	get := func(key, def string) string {
+		if v := strings.TrimSpace(getenv(key)); v != "" {
+			return v
+		}
+		return def
+	}
+	c := &Config{
+		ListenAddr:              get("LISTEN_ADDR", ":8080"),
+		ClusterName:             get("CLUSTER_NAME", "cluster"),
+		Kubeconfig:              get("KUBECONFIG", ""),
+		AuthHeader:              get("AUTH_HEADER", ""),
+		AllowedUsers:            list(get("AUTH_ALLOWED_USERS", "")),
+		HideNamespaces:          list(get("HIDE_NAMESPACES", "kube-system,kube-public,kube-node-lease")),
+		BackupSelector:          get("BACKUP_SELECTOR", "clusterdeck.io/role=backup"),
+		RestoreCheckSelector:    get("RESTORE_CHECK_SELECTOR", "clusterdeck.io/role=restore-check"),
+		RestoreTemplateSelector: get("RESTORE_TEMPLATE_SELECTOR", "clusterdeck.io/role=restore-template"),
+		MetricsProvider:         get("METRICS_PROVIDER", "none"),
+		SigNozURL:               get("SIGNOZ_URL", ""),
+		SigNozAPIKey:            get("SIGNOZ_API_KEY", ""),
+		SigNozFilter:            get("SIGNOZ_FILTER", ""),
+		PrometheusURL:           get("PROMETHEUS_URL", ""),
+	}
+	var err error
+	if c.ActionsEnabled, err = strconv.ParseBool(get("ACTIONS_ENABLED", "false")); err != nil {
+		return nil, fmt.Errorf("ACTIONS_ENABLED: %w", err)
+	}
+	if c.ActionsEnabled && c.AuthHeader == "" {
+		return nil, fmt.Errorf("ACTIONS_ENABLED=true needs AUTH_HEADER: actions are only allowed for an identified user")
+	}
+	switch c.MetricsProvider {
+	case "none":
+	case "signoz":
+		if c.SigNozURL == "" || c.SigNozAPIKey == "" {
+			return nil, fmt.Errorf("METRICS_PROVIDER=signoz needs SIGNOZ_URL and SIGNOZ_API_KEY")
+		}
+	case "prometheus":
+		if c.PrometheusURL == "" {
+			return nil, fmt.Errorf("METRICS_PROVIDER=prometheus needs PROMETHEUS_URL")
+		}
+	default:
+		return nil, fmt.Errorf("METRICS_PROVIDER must be none, signoz or prometheus, got %q", c.MetricsProvider)
+	}
+	return c, nil
+}
+
+func FromOS() (*Config, error) { return FromEnv(os.Getenv) }
+
+func list(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}

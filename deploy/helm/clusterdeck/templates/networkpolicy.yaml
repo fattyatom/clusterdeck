@@ -1,0 +1,20 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "clusterdeck.fullname" . }}
+  labels: {{- include "clusterdeck.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "clusterdeck.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- range required "networkPolicy.ingressFromNamespaces must list the auth proxy's namespace" .Values.networkPolicy.ingressFromNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports:
+        - {port: 8080, protocol: TCP}
+{{- end }}

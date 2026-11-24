@@ -1,0 +1,26 @@
+clusterName: prem-uk-k3s-cluster
+
+auth:
+  header: X-Forwarded-Email
+  allowedUsers: []
+
+actions:
+  enabled: true
+  namespaces: [sure, sure-testing, nextexplorer, nextexplorer-testing]
+
+selectors:
+  backup: clusterdeck.io/role=backup
+  restoreCheck: clusterdeck.io/role=restore-check
+  restoreTemplate: clusterdeck.io/role=restore-template
+
+metrics:
+  provider: signoz
+  signoz:
+    url: http://signoz.internal.example
+    filter: k8s.cluster.name = 'prem-uk-k3s-cluster'
+    existingSecret: clusterdeck-signoz
+    secretKey: api-key
+
+networkPolicy:
+  enabled: true
+  ingressFromNamespaces: [kube-system]

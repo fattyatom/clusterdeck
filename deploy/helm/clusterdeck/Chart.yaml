@@ -1,0 +1,6 @@
+apiVersion: v2
+name: clusterdeck
+description: A small self-hosted dashboard for a Kubernetes cluster - apps, load, backups and restores.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
