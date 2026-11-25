@@ -59,6 +59,9 @@ cluster. The break-glass path stays `kubectl`.
   ConfigMaps, workloads, Jobs, CronJobs, node metrics, Argo CD Applications.
   Never Secrets. Pod logs and ConfigMaps can still hold sensitive values, so
   treat access to the UI like access to `kubectl` with the `view` role.
+- A GitHub token, when configured, can write to every repository it is
+  granted. Scope it to the repositories your Applications use and protect
+  their target branches.
 - Write access exists only when `actions.enabled` is true: `create` on Jobs
   and Events, `patch` on Deployments, StatefulSets and DaemonSets, and
   `update` on Deployments (rollback), cluster-wide or only in
@@ -76,10 +79,18 @@ cluster. The break-glass path stays `kubectl`.
 ## Rollback and GitOps
 
 A rollback in the cluster and a rollback in git are different things. With
-Argo CD self-heal on, only the second one sticks, so clusterdeck refuses the
-first and shows which git revision to revert. A rollback that opens a revert
-pull request would serve self-healed apps, at the cost of a git token. It is
-not built.
+Argo CD self-heal on, only the second one sticks, so for those apps
+clusterdeck opens a pull request instead.
+
+It restores the Application's path to its state at an earlier synced commit,
+rather than reverting individual commits. That is what "go back to what was
+running" means, and it works the same whether the commits since were merges,
+squashes or several unrelated changes. Files outside the path are left alone
+and listed, because a shared base usually serves other environments too.
+
+Automatic mode only opens the pull request. Merging stays a human decision,
+which keeps branch protection and review in charge of what reaches the
+cluster.
 
 ## Not yet
 

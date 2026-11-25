@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -12,6 +13,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/fattyatom/clusterdeck/internal/gitops"
 )
 
 const (
@@ -59,17 +62,22 @@ type SyncRecord struct {
 }
 
 type Manager struct {
-	Kind         string       `json:"kind"`
-	Application  string       `json:"application"`
-	AutoSync     bool         `json:"autoSync"`
-	SelfHeal     bool         `json:"selfHeal"`
-	SyncStatus   string       `json:"syncStatus"`
-	Health       string       `json:"health"`
-	SyncRevision string       `json:"syncRevision"`
-	History      []SyncRecord `json:"history"`
+	Kind             string         `json:"kind"`
+	Application      string         `json:"application"`
+	Namespace        string         `json:"namespace"`
+	Source           *gitops.Source `json:"source"`
+	SourceNote       string         `json:"sourceNote"`
+	PreviousRevision string         `json:"previousRevision"`
+	AutoSync         bool           `json:"autoSync"`
+	SelfHeal         bool           `json:"selfHeal"`
+	SyncStatus       string         `json:"syncStatus"`
+	Health           string         `json:"health"`
+	SyncRevision     string         `json:"syncRevision"`
+	History          []SyncRecord   `json:"history"`
 }
 
 type RollbackPolicy struct {
+	Mode    string `json:"mode"`
 	Allowed bool   `json:"allowed"`
 	Reason  string `json:"reason"`
 	Auto    bool   `json:"auto"`
@@ -212,7 +220,7 @@ func (c *Client) describeRollout(d *appsv1.Deployment, allRS []appsv1.ReplicaSet
 
 	r.Manager = managerFor(d, apps)
 	r.Stages = stages(r, d)
-	r.Rollback = rollbackPolicy(d, r.Manager, len(owned))
+	r.Rollback = rollbackPolicy(d, r.Manager, len(owned), c.Git != nil)
 	if from, ok := d.Annotations[AnnAutoRollbackFrom]; ok {
 		f, _ := strconv.ParseInt(from, 10, 64)
 		t, _ := strconv.ParseInt(d.Annotations[AnnAutoRollbackTo], 10, 64)
@@ -308,15 +316,33 @@ func short(rev string) string {
 	return rev
 }
 
-func rollbackPolicy(d *appsv1.Deployment, m Manager, revisions int) RollbackPolicy {
-	p := RollbackPolicy{Allowed: true, Auto: d.Annotations[AnnAutoRollback] == "true", Grace: DefaultRollbackGrace.String()}
+const (
+	ModeCluster     = "cluster"
+	ModePullRequest = "pull-request"
+	ModeNone        = "none"
+)
+
+func rollbackPolicy(d *appsv1.Deployment, m Manager, revisions int, git bool) RollbackPolicy {
+	p := RollbackPolicy{Mode: ModeCluster, Allowed: true, Auto: d.Annotations[AnnAutoRollback] == "true", Grace: DefaultRollbackGrace.String()}
 	if g, err := time.ParseDuration(d.Annotations[AnnRollbackGrace]); err == nil && g > 0 {
 		p.Grace = g.String()
 	}
+	if m.Kind == "argocd" && m.SelfHeal {
+		p.Mode, p.Allowed = ModeNone, false
+		switch {
+		case !git:
+			p.Reason = fmt.Sprintf("Argo CD application %s self-heals, so it would undo a rollback in the cluster within seconds. Configure a GitHub token to roll back by pull request, or revert in git to the commit before %s.", m.Application, short(m.SyncRevision))
+		case m.Source == nil:
+			p.Reason = fmt.Sprintf("Argo CD application %s self-heals, and rollback by pull request cannot handle it: %s.", m.Application, m.SourceNote)
+		case m.PreviousRevision == "":
+			p.Reason = fmt.Sprintf("Argo CD application %s self-heals, and its sync history has no earlier commit to roll back to.", m.Application)
+		default:
+			p.Mode, p.Allowed = ModePullRequest, true
+			p.Reason = fmt.Sprintf("Argo CD application %s self-heals, so rollback opens a pull request that restores %s to an earlier synced commit. It takes effect when you merge it.", m.Application, strings.Trim(m.Source.Path, "/"))
+		}
+		return p
+	}
 	switch {
-	case m.Kind == "argocd" && m.SelfHeal:
-		p.Allowed = false
-		p.Reason = fmt.Sprintf("Argo CD application %s self-heals, so it would undo a rollback within seconds. Roll back in git instead (revert to the commit before %s).", m.Application, short(m.SyncRevision))
 	case d.Spec.Paused:
 		p.Allowed = false
 		p.Reason = "the deployment is paused"
@@ -370,7 +396,27 @@ func managerFor(d *appsv1.Deployment, apps []argoApp) Manager {
 	if match == nil {
 		return m
 	}
-	m.Kind, m.Application = "argocd", match.name
+	return managerFromApp(*match)
+}
+
+func managerFromApp(match argoApp) Manager {
+	m := Manager{Kind: "argocd", Application: match.name, Namespace: match.namespace, History: []SyncRecord{}}
+	if sources, found, _ := unstructured.NestedSlice(match.obj, "spec", "sources"); found && len(sources) > 0 {
+		m.SourceNote = "the application has several sources, and only one is supported"
+	} else {
+		chart, _, _ := unstructured.NestedString(match.obj, "spec", "source", "chart")
+		src := gitops.Source{}
+		src.RepoURL, _, _ = unstructured.NestedString(match.obj, "spec", "source", "repoURL")
+		src.Path, _, _ = unstructured.NestedString(match.obj, "spec", "source", "path")
+		src.TargetRevision, _, _ = unstructured.NestedString(match.obj, "spec", "source", "targetRevision")
+		if chart != "" {
+			m.SourceNote = "the application deploys a chart from a Helm repository, not a path in git"
+		} else if err := gitops.Supported(src); err != nil {
+			m.SourceNote = strings.TrimPrefix(err.Error(), gitops.ErrUnsupported.Error()+": ")
+		} else {
+			m.Source = &src
+		}
+	}
 	if auto, found, _ := unstructured.NestedMap(match.obj, "spec", "syncPolicy", "automated"); found && auto != nil {
 		enabled, hasEnabled, _ := unstructured.NestedBool(match.obj, "spec", "syncPolicy", "automated", "enabled")
 		m.AutoSync = !hasEnabled || enabled
@@ -396,6 +442,12 @@ func managerFor(d *appsv1.Deployment, apps []argoApp) Manager {
 		}
 		m.History = append(m.History, rec)
 	}
+	for _, h := range m.History {
+		if h.Revision != "" && h.Revision != m.SyncRevision {
+			m.PreviousRevision = h.Revision
+			break
+		}
+	}
 	return m
 }
 
@@ -409,7 +461,10 @@ func (c *Client) Rollback(ctx context.Context, ns, name string, toRevision int64
 		return "", err
 	}
 	owned := ownedReplicaSets(d, rss.Items)
-	policy := rollbackPolicy(d, managerFor(d, c.argoApps(ctx)), len(owned))
+	policy := rollbackPolicy(d, managerFor(d, c.argoApps(ctx)), len(owned), c.Git != nil)
+	if policy.Mode == ModePullRequest {
+		return "", fmt.Errorf("%w: this app rolls back by pull request", ErrForbidden)
+	}
 	if !policy.Allowed {
 		return "", fmt.Errorf("%w: %s", ErrForbidden, policy.Reason)
 	}
@@ -475,7 +530,46 @@ func (c *Client) event(ctx context.Context, d *appsv1.Deployment, kind, reason, 
 type AutoRollbackResult struct {
 	Namespace, Name string
 	From, To        int64
+	PullRequest     string
 	Reason          string
+}
+
+func (c *Client) RollbackPR(ctx context.Context, appNS, appName, toRevision, user string) (string, error) {
+	if c.Git == nil {
+		return "", fmt.Errorf("%w: rollback by pull request is not configured", ErrForbidden)
+	}
+	if c.Dynamic == nil {
+		return "", fmt.Errorf("%w: Argo CD is not reachable", ErrInvalid)
+	}
+	obj, err := c.Dynamic.Resource(argoAppGVR).Namespace(appNS).Get(ctx, appName, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	m := managerFromApp(argoApp{name: obj.GetName(), namespace: obj.GetNamespace(), obj: obj.Object})
+	if m.Source == nil {
+		return "", fmt.Errorf("%w: %s", ErrInvalid, m.SourceNote)
+	}
+	if toRevision == "" {
+		toRevision = m.PreviousRevision
+	}
+	known := false
+	for _, h := range m.History {
+		known = known || (h.Revision == toRevision && toRevision != "")
+	}
+	if !known || toRevision == m.SyncRevision {
+		return "", fmt.Errorf("%w: %q is not an earlier revision in %s's sync history", ErrInvalid, toRevision, appName)
+	}
+	pr, err := c.Git.OpenRollback(ctx, gitops.Request{App: appName, Source: *m.Source, FromRevision: m.SyncRevision, ToRevision: toRevision, User: user})
+	if err != nil {
+		if errors.Is(err, gitops.ErrUnsupported) || errors.Is(err, gitops.ErrNoChange) || errors.Is(err, gitops.ErrExists) {
+			return "", fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+		return "", err
+	}
+	if pr.Existing {
+		return fmt.Sprintf("a rollback pull request for this revision is already open: %s", pr.URL), nil
+	}
+	return fmt.Sprintf("opened pull request #%d: %s", pr.Number, pr.URL), nil
 }
 
 func (c *Client) AutoRollback(ctx context.Context, namespaces []string) ([]AutoRollbackResult, error) {
@@ -526,7 +620,9 @@ func (c *Client) autoRollbackOne(ctx context.Context, d *appsv1.Deployment, rss 
 		return nil, nil
 	}
 	owned := ownedReplicaSets(d, rss)
-	if !rollbackPolicy(d, managerFor(d, apps), len(owned)).Allowed {
+	manager := managerFor(d, apps)
+	policy := rollbackPolicy(d, manager, len(owned), c.Git != nil)
+	if !policy.Allowed {
 		return nil, nil
 	}
 	var currentRS *appsv1.ReplicaSet
@@ -551,6 +647,10 @@ func (c *Client) autoRollbackOne(ctx context.Context, d *appsv1.Deployment, rss 
 	if !deadline && c.Now().Sub(currentRS.CreationTimestamp.Time) < grace {
 		return nil, nil
 	}
+	reason := strings.Join(problems, "; ")
+	if policy.Mode == ModePullRequest {
+		return c.autoRollbackPR(ctx, d, manager, current, reason)
+	}
 	target, err := pickRevision(d, owned, 0)
 	if err != nil {
 		return nil, nil
@@ -564,8 +664,33 @@ func (c *Client) autoRollbackOne(ctx context.Context, d *appsv1.Deployment, rss 
 	if err != nil {
 		return nil, err
 	}
-	reason := strings.Join(problems, "; ")
 	c.event(ctx, d, corev1.EventTypeWarning, "ClusterdeckAutoRollback",
 		fmt.Sprintf("revision %d failed (%s); rolled back to the template of revision %d", current, reason, revisionOf(target.ObjectMeta)))
 	return &AutoRollbackResult{Namespace: d.Namespace, Name: d.Name, From: current, To: revisionOf(target.ObjectMeta), Reason: reason}, nil
+}
+
+func (c *Client) autoRollbackPR(ctx context.Context, d *appsv1.Deployment, m Manager, current int64, reason string) (*AutoRollbackResult, error) {
+	landed, err := c.Git.RolledBackSince(ctx, *m.Source, m.Application, m.PreviousRevision)
+	if err != nil {
+		return nil, err
+	}
+	if landed {
+		return nil, nil
+	}
+	pr, err := c.Git.OpenRollback(ctx, gitops.Request{
+		App: m.Application, Source: *m.Source, FromRevision: m.SyncRevision, ToRevision: m.PreviousRevision,
+		User: "clusterdeck", Reason: fmt.Sprintf("deployment %s, revision %d: %s", d.Name, current, reason), Auto: true,
+	})
+	if errors.Is(err, gitops.ErrExists) || errors.Is(err, gitops.ErrNoChange) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if pr.Existing {
+		return nil, nil
+	}
+	c.event(ctx, d, corev1.EventTypeWarning, "ClusterdeckRollbackPullRequest",
+		fmt.Sprintf("revision %d failed (%s); opened %s to roll %s back to %s", current, reason, pr.URL, m.Application, short(m.PreviousRevision)))
+	return &AutoRollbackResult{Namespace: d.Namespace, Name: d.Name, From: current, PullRequest: pr.URL, Reason: reason}, nil
 }

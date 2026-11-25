@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/fattyatom/clusterdeck/internal/config"
+	"github.com/fattyatom/clusterdeck/internal/gitops"
 	"github.com/fattyatom/clusterdeck/internal/kube"
 	"github.com/fattyatom/clusterdeck/internal/metrics"
 	"github.com/fattyatom/clusterdeck/internal/server"
@@ -57,6 +58,10 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	if cfg.GitHubToken != "" {
+		cluster.Git = &gitops.GitHub{API: cfg.GitHubAPIURL, Token: cfg.GitHubToken}
+	}
+
 	var provider metrics.Provider = metrics.None{}
 	switch cfg.MetricsProvider {
 	case "signoz":
@@ -71,6 +76,7 @@ func run(logger *slog.Logger) error {
 		AllowedUsers:   cfg.AllowedUsers,
 		ActionsEnabled: cfg.ActionsEnabled,
 		AutoRollback:   cfg.AutoRollback,
+		GitRollback:    cluster.Git != nil,
 		Static:         web.FS(),
 		Logger:         logger,
 	})
@@ -100,7 +106,7 @@ func autoRollback(ctx context.Context, cluster *kube.Client, namespaces []string
 	for {
 		results, err := cluster.AutoRollback(ctx, namespaces)
 		for _, r := range results {
-			logger.Warn("auto rollback", "user", "clusterdeck", "namespace", r.Namespace, "deployment", r.Name, "from", r.From, "to", r.To, "reason", r.Reason)
+			logger.Warn("auto rollback", "user", "clusterdeck", "namespace", r.Namespace, "deployment", r.Name, "from", r.From, "to", r.To, "pull_request", r.PullRequest, "reason", r.Reason)
 		}
 		if err != nil {
 			logger.Error("auto rollback check failed", "error", err.Error())

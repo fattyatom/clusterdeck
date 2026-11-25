@@ -7,7 +7,8 @@ guarded buttons to roll back or restore**.
 
 clusterdeck is not a deploy tool. Argo CD, Flux or `kubectl apply` stay in
 charge of what runs. clusterdeck reads the cluster, runs a few Jobs, and rolls
-a Deployment back only where your GitOps controller will not undo it.
+a Deployment back in the cluster only where your GitOps controller will not
+undo it. Where it would, the rollback is a pull request.
 
 | Tab | What it shows | Where the data comes from |
 |---|---|---|
@@ -94,12 +95,49 @@ Deployment:
 | Nothing (plain `kubectl`, Helm) | Offered |
 | Argo CD, manual sync | Offered |
 | Argo CD, auto-sync without self-heal | Offered, with a warning: Argo CD shows the app `OutOfSync` and re-applies git on the next change |
-| Argo CD, auto-sync **with self-heal** | **Refused**: Argo CD would undo it within seconds. The page names the git revision to revert instead |
+| Argo CD, auto-sync **with self-heal** | **By pull request** when a GitHub token is configured (below); otherwise refused, because Argo CD would undo it within seconds |
 
 clusterdeck finds the owning Argo CD Application from the
 `argocd.argoproj.io/tracking-id` annotation, then the
 `app.kubernetes.io/instance` label, then the Application deploying to the
 Deployment's namespace.
+
+### Rollback by pull request
+
+With self-heal on, only git can roll an app back. When `gitops.github` is
+configured, the rollback button on a self-healed app opens a pull request
+instead of touching the cluster, and each earlier entry in the Argo CD sync
+history gets a **Rollback PR to this** button.
+
+The pull request restores the Application's `spec.source.path` to exactly what
+it was at the chosen synced commit: changed files go back, files added since
+are deleted, and nothing outside the path changes. It targets the
+Application's `targetRevision` branch (the default branch for `HEAD`), and its
+description lists the files restored, the commits since, and files changed
+outside the path that it did **not** revert, such as a shared kustomize base.
+Nothing changes in the cluster until you merge it and Argo CD syncs.
+
+| Supported | Not supported (the page says why) |
+|---|---|
+| One git source on github.com, with a `path`, tracking a branch | Several sources, Helm charts from a chart repository, other git hosts, a `targetRevision` that is a tag or commit |
+
+The token needs, on the repositories your Applications use, **Contents:
+read and write** and **Pull requests: read and write** (a fine-grained
+personal access token or a GitHub App token). clusterdeck only creates
+branches named `clusterdeck/rollback-*`; protect your target branch so a
+rollback still needs a review to merge.
+
+```yaml
+gitops:
+  github:
+    existingSecret: clusterdeck-github
+    secretKey: token
+```
+
+The pod also needs outbound HTTPS to `api.github.com` (or your
+`gitops.github.apiURL`).
+
+### Auto-rollback
 
 **Auto-rollback** is opt-in twice: the install needs
 `actions.autoRollback.enabled: true`, and each Deployment needs
@@ -117,7 +155,14 @@ period (default 5m), or at once when its progress deadline has passed. It never
 rolls back a revision that is itself an auto-rollback, so a bad previous
 revision cannot cause a loop: it stops and waits for a person. It records what
 it did in `clusterdeck.io/auto-rollback-from`, `-to` and `-at` annotations, a
-Warning Event and a log line. Only Deployments are covered; StatefulSets and
+Warning Event and a log line.
+
+For a self-healed app in pull-request mode, auto-rollback **opens** the
+pull request to the previous synced commit and leaves merging to you. It opens
+at most one per failing commit (the branch name carries that commit), and none
+at all once a clusterdeck rollback of the app has landed after the previous
+commit, so a rollback that still fails stops for a person rather than rolling
+"back" to the bad commit. Only Deployments are covered; StatefulSets and
 DaemonSets are not.
 
 ## Health of a backup
@@ -155,6 +200,7 @@ The binary reads environment variables; the chart sets them from values.
 | `ACTIONS_ENABLED` | `false`; needs `AUTH_HEADER` |
 | `ACTIONS_NAMESPACES` | empty: all namespaces (auto-rollback scope; the chart also scopes RBAC to it) |
 | `AUTO_ROLLBACK_ENABLED`, `AUTO_ROLLBACK_INTERVAL` | `false`, `30s`; needs `ACTIONS_ENABLED` |
+| `GITHUB_TOKEN`, `GITHUB_API_URL` | empty (no rollback by pull request), `https://api.github.com` |
 | `HIDE_NAMESPACES` | `kube-system,kube-public,kube-node-lease` (Apps tab only) |
 | `BACKUP_SELECTOR`, `RESTORE_CHECK_SELECTOR`, `RESTORE_TEMPLATE_SELECTOR` | `clusterdeck.io/role=...` |
 | `METRICS_PROVIDER` | `none` |

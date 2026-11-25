@@ -23,6 +23,12 @@ selectors:
   restoreCheck: clusterdeck.io/role=restore-check
   restoreTemplate: clusterdeck.io/role=restore-template
 
+gitops:
+  github:
+    existingSecret: ""
+    secretKey: token
+    apiURL: https://api.github.com
+
 metrics:
   provider: none
   signoz:

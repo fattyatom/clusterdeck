@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fmtBytes, fmtCores, fmtValue, fmtAgo, pct, tone, bounds, linePath, parseRoute, appHref, shortRev, autoRollbackText } from "./format.js";
+import { fmtBytes, fmtCores, fmtValue, fmtAgo, pct, tone, bounds, linePath, parseRoute, appHref, shortRev, autoRollbackText, linkify } from "./format.js";
 
 test("fmtBytes picks a binary unit", () => {
   assert.equal(fmtBytes(512), "512 B");
@@ -72,4 +72,15 @@ test("autoRollbackText explains each state", () => {
   assert.match(autoRollbackText(r(false, true), true), /Annotate/);
   assert.match(autoRollbackText(r(true, false, "self-heals"), true), /cannot act, for the reason above/);
   assert.match(autoRollbackText(r(true, true), true), /after 5m0s/);
+  const pr = { rollback: { auto: true, allowed: true, mode: "pull-request", grace: "5m0s" } };
+  assert.match(autoRollbackText(pr, true), /opens a rollback pull request after 5m0s/);
+});
+
+test("linkify splits out https links only", () => {
+  assert.deepEqual(linkify("opened pull request #9: https://github.com/o/r/pull/9"), [
+    { text: "opened pull request #9: " },
+    { text: "https://github.com/o/r/pull/9", href: "https://github.com/o/r/pull/9" },
+  ]);
+  assert.deepEqual(linkify("no links, javascript:alert(1)"), [{ text: "no links, javascript:alert(1)" }]);
+  assert.deepEqual(linkify(""), []);
 });

@@ -27,6 +27,8 @@ type Config struct {
 	SigNozAPIKey            string
 	SigNozFilter            string
 	PrometheusURL           string
+	GitHubToken             string
+	GitHubAPIURL            string
 }
 
 func FromEnv(getenv func(string) string) (*Config, error) {
@@ -52,6 +54,8 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 		SigNozAPIKey:            get("SIGNOZ_API_KEY", ""),
 		SigNozFilter:            get("SIGNOZ_FILTER", ""),
 		PrometheusURL:           get("PROMETHEUS_URL", ""),
+		GitHubToken:             get("GITHUB_TOKEN", ""),
+		GitHubAPIURL:            get("GITHUB_API_URL", "https://api.github.com"),
 	}
 	var err error
 	if c.ActionsEnabled, err = strconv.ParseBool(get("ACTIONS_ENABLED", "false")); err != nil {

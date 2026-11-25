@@ -1,6 +1,6 @@
 <script>
   import { api } from "./lib/api.js";
-  import { parseRoute } from "./lib/format.js";
+  import { parseRoute, linkify } from "./lib/format.js";
   import { notice } from "./lib/notify.svelte.js";
   import Modal from "./components/Modal.svelte";
   import Overview from "./views/Overview.svelte";
@@ -60,6 +60,6 @@
 </main>
 
 <Modal bind:open={notice.open} title={notice.title}>
-  <pre>{notice.text}</pre>
+  <pre>{#each linkify(notice.text) as part}{#if part.href}<a href={part.href} target="_blank" rel="noopener noreferrer">{part.text}</a>{:else}{part.text}{/if}{/each}</pre>
   <div class="actions"><button onclick={() => (notice.open = false)}>Close</button></div>
 </Modal>

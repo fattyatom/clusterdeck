@@ -25,6 +25,14 @@
     return () => clearInterval(timer);
   });
 
+  async function rollbackPR(r, revision) {
+    const src = r.manager.source;
+    if (!confirm(`Open a pull request that restores ${src.path} in ${src.repoURL} to ${shortRev(revision)}?`)) return;
+    busy = true;
+    await act("Rollback pull request", () => post(`/api/argo/${encodeURIComponent(r.manager.namespace)}/${encodeURIComponent(r.manager.application)}/rollback-pr`, { revision }));
+    busy = false;
+  }
+
   async function rollback(r, revision) {
     const target = revision ? `revision ${revision}` : "the previous revision";
     if (!confirm(`Roll back ${r.namespace}/${r.name} from revision ${r.revision} to ${target}?`)) return;
@@ -36,6 +44,8 @@
 
   const icon = { done: "✓", active: "●", failed: "✕", pending: "○" };
   const canAct = (r) => config.actionsEnabled && r.rollback.allowed && !busy;
+  const prMode = (r) => r.rollback.mode === "pull-request";
+  const canPR = (r) => config.actionsEnabled && config.gitRollback && r.manager.source && !busy;
 </script>
 
 <p class="crumbs"><a href="#apps">Apps</a> / <span class="mono">{namespace}</span> / <strong>{app}</strong></p>
@@ -58,6 +68,7 @@
           Argo CD <span class="mono">{r.manager.application}</span>
           · {r.manager.autoSync ? "auto-sync" : "manual sync"}{r.manager.selfHeal ? " · self-heal" : ""}
           · at <span class="mono">{shortRev(r.manager.syncRevision)}</span>
+          {#if r.manager.source}<div class="mono">{r.manager.source.repoURL} · {r.manager.source.path} · {r.manager.source.targetRevision || "HEAD"}</div>{/if}
         </div>
       {:else}
         <div class="small muted">Not managed by Argo CD</div>
@@ -78,7 +89,11 @@
         <div class="row">
           <strong>Rollback</strong>
           {#if config.actionsEnabled}
-            <button class="danger" disabled={!canAct(r)} onclick={() => rollback(r, 0)}>Roll back to previous</button>
+            {#if prMode(r)}
+              <button class="danger" disabled={!canAct(r)} onclick={() => rollbackPR(r, r.manager.previousRevision)}>Open rollback PR to {shortRev(r.manager.previousRevision)}</button>
+            {:else}
+              <button class="danger" disabled={!canAct(r)} onclick={() => rollback(r, 0)}>Roll back to previous</button>
+            {/if}
           {/if}
         </div>
         {#if !r.rollback.allowed}
@@ -101,16 +116,21 @@
             <td class="mono small">{h.images.join(", ")}{#if h.changeCause}<div class="muted">{h.changeCause}</div>{/if}</td>
             <td>{fmtAgo(h.created)}</td>
             <td>{h.ready}/{h.replicas}</td>
-            <td>{#if config.actionsEnabled && !h.current}<button disabled={!canAct(r)} onclick={() => rollback(r, h.revision)}>Roll back here</button>{/if}</td>
+            <td>{#if config.actionsEnabled && !h.current && r.rollback.mode === "cluster"}<button disabled={!canAct(r)} onclick={() => rollback(r, h.revision)}>Roll back here</button>{/if}</td>
           </tr>
         {/each}
       </DataTable>
 
       {#if r.manager.history.length}
         <h4>Argo CD syncs</h4>
-        <DataTable head={["#", "Git revision", "Deployed"]}>
+        <DataTable head={["#", "Git revision", "Deployed", ""]}>
           {#each r.manager.history as s (s.id)}
-            <tr><td>{s.id}</td><td class="mono">{shortRev(s.revision)}</td><td>{fmtAgo(s.deployedAt)}</td></tr>
+            <tr class:current={s.revision === r.manager.syncRevision && s.id === r.manager.history[0].id}>
+              <td>{s.id}</td>
+              <td class="mono">{shortRev(s.revision)}</td>
+              <td>{fmtAgo(s.deployedAt)}</td>
+              <td>{#if canPR(r) && s.revision && s.revision !== r.manager.syncRevision}<button onclick={() => rollbackPR(r, s.revision)}>Rollback PR to this</button>{/if}</td>
+            </tr>
           {/each}
         </DataTable>
       {/if}
