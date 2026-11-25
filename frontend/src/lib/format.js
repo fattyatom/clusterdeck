@@ -117,9 +117,23 @@ export function appHref(namespace, app) {
   return `#apps/${encodeURIComponent(namespace)}/${encodeURIComponent(app)}`;
 }
 
+export function linkify(text) {
+  const parts = [];
+  const re = /https:\/\/[^\s<>"']+/g;
+  let last = 0;
+  for (const m of String(text ?? "").matchAll(re)) {
+    if (m.index > last) parts.push({ text: text.slice(last, m.index) });
+    parts.push({ text: m[0], href: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < String(text ?? "").length) parts.push({ text: String(text).slice(last) });
+  return parts;
+}
+
 export function autoRollbackText(rollout, enabledInstall) {
   if (!enabledInstall) return "Auto-rollback is off for this clusterdeck install.";
   if (!rollout.rollback.auto) return 'Auto-rollback is off. Annotate the Deployment with clusterdeck.io/auto-rollback: "true" to turn it on.';
   if (!rollout.rollback.allowed) return "Auto-rollback is on, but cannot act, for the reason above.";
+  if (rollout.rollback.mode === "pull-request") return `Auto-rollback is on: a failing revision opens a rollback pull request after ${rollout.rollback.grace}, or as soon as its progress deadline passes. Merging it is up to you.`;
   return `Auto-rollback is on: a failing revision is rolled back after ${rollout.rollback.grace}, or as soon as its progress deadline passes.`;
 }

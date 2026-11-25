@@ -26,6 +26,7 @@ type fakeCluster struct {
 	}
 	restarted  string
 	rolledBack string
+	rollbackPR string
 }
 
 func (f *fakeCluster) Overview(context.Context) (*kube.Overview, error) {
@@ -63,6 +64,11 @@ func (f *fakeCluster) Rollouts(_ context.Context, ns, app string) ([]kube.Rollou
 func (f *fakeCluster) Rollback(_ context.Context, ns, name string, rev int64, user string) (string, error) {
 	f.rolledBack = fmt.Sprintf("%s/%s@%d by %s", ns, name, rev, user)
 	return "ok", nil
+}
+
+func (f *fakeCluster) RollbackPR(_ context.Context, ns, app, rev, user string) (string, error) {
+	f.rollbackPR = fmt.Sprintf("%s/%s@%s by %s", ns, app, rev, user)
+	return "opened pull request #1: https://example.com/1", nil
 }
 
 type fakeMetrics struct{ window time.Duration }
@@ -229,5 +235,25 @@ func TestRollouts(t *testing.T) {
 	ro, fc2, _, _ := newServer(Options{AuthHeader: "X-Forwarded-Email"})
 	if rec := do(ro, "POST", "/api/deployments/shop/web/rollback", `{}`, authed); rec.Code != http.StatusForbidden || fc2.rolledBack != "" {
 		t.Fatalf("read-only rollback: %d", rec.Code)
+	}
+}
+
+func TestRollbackPR(t *testing.T) {
+	s, fc, _, logs := newServer(Options{AuthHeader: "X-Forwarded-Email", ActionsEnabled: true, GitRollback: true})
+	rec := do(s, "POST", "/api/argo/argocd/shop/rollback-pr", `{"revision":"abc1234"}`, authed)
+	if rec.Code != http.StatusOK || fc.rollbackPR != "argocd/shop@abc1234 by me@example.com" || !strings.Contains(rec.Body.String(), "pull request #1") {
+		t.Fatalf("rollback pr: %d %s %q", rec.Code, rec.Body, fc.rollbackPR)
+	}
+	if !strings.Contains(logs.String(), "rollback-pr") {
+		t.Fatal("rollback PRs must be audited")
+	}
+	var cfg map[string]any
+	json.Unmarshal(do(s, "GET", "/api/config", "", authed).Body.Bytes(), &cfg)
+	if cfg["gitRollback"] != true {
+		t.Fatalf("config = %v", cfg)
+	}
+	ro, fc2, _, _ := newServer(Options{AuthHeader: "X-Forwarded-Email", GitRollback: true})
+	if rec := do(ro, "POST", "/api/argo/argocd/shop/rollback-pr", `{}`, authed); rec.Code != http.StatusForbidden || fc2.rollbackPR != "" {
+		t.Fatalf("read-only: %d", rec.Code)
 	}
 }

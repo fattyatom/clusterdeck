@@ -49,6 +49,9 @@ func TestFullConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if c.GitHubAPIURL != "https://api.github.com" || c.GitHubToken != "" {
+		t.Fatalf("github defaults = %+v", c)
+	}
 	if !c.AutoRollback || c.AutoRollbackInterval.Seconds() != 30 || len(c.ActionsNamespaces) != 2 {
 		t.Fatalf("auto rollback config = %+v", c)
 	}

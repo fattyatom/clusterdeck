@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/fattyatom/clusterdeck/internal/gitops"
 )
 
 const (
@@ -33,9 +36,15 @@ type Options struct {
 	RestoreTemplateSelector string
 }
 
+type GitRollbacker interface {
+	OpenRollback(ctx context.Context, req gitops.Request) (*gitops.PullRequest, error)
+	RolledBackSince(ctx context.Context, src gitops.Source, app, since string) (bool, error)
+}
+
 type Client struct {
 	Core    kubernetes.Interface
 	Dynamic dynamic.Interface
+	Git     GitRollbacker
 	Now     func() time.Time
 
 	hidden          map[string]bool

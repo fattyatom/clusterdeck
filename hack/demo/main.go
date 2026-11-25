@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"log/slog"
 	"math"
@@ -23,11 +24,23 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
+	"github.com/fattyatom/clusterdeck/internal/gitops"
 	"github.com/fattyatom/clusterdeck/internal/kube"
 	"github.com/fattyatom/clusterdeck/internal/metrics"
 	"github.com/fattyatom/clusterdeck/internal/server"
 	"github.com/fattyatom/clusterdeck/web"
 )
+
+type demoGit struct{ n int }
+
+func (g *demoGit) OpenRollback(_ context.Context, req gitops.Request) (*gitops.PullRequest, error) {
+	g.n++
+	return &gitops.PullRequest{Number: 40 + g.n, URL: fmt.Sprintf("https://github.com/example/infra/pull/%d", 40+g.n), Branch: gitops.BranchFor(req.App, req.FromRevision)}, nil
+}
+
+func (g *demoGit) RolledBackSince(context.Context, gitops.Source, string, string) (bool, error) {
+	return false, nil
+}
 
 type wave struct{}
 
@@ -218,7 +231,8 @@ func main() {
 		dyn.Tracker().Create(schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"},
 			&unstructured.Unstructured{Object: map[string]any{"apiVersion": "argoproj.io/v1alpha1", "kind": "Application",
 				"metadata": map[string]any{"name": ns, "namespace": "argocd"},
-				"spec":     map[string]any{"destination": map[string]any{"namespace": ns}, "syncPolicy": map[string]any{"automated": automated}},
+				"spec": map[string]any{"destination": map[string]any{"namespace": ns}, "syncPolicy": map[string]any{"automated": automated},
+					"source": map[string]any{"repoURL": "https://github.com/example/infra.git", "path": "apps/" + ns + "/production", "targetRevision": "main"}},
 				"status": map[string]any{"sync": map[string]any{"status": st[0], "revision": "3f2a9c1e5b7d"}, "health": map[string]any{"status": st[1]},
 					"history": []any{
 						map[string]any{"id": int64(11), "revision": "8d0e4b2aa1c3", "deployedAt": now.Add(-3 * 24 * time.Hour).UTC().Format(time.RFC3339)},
@@ -233,8 +247,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	cluster.Git = &demoGit{}
 	h := server.New(cluster, wave{}, server.Options{
-		ClusterName: "demo-cluster", AuthHeader: "X-Forwarded-Email", ActionsEnabled: true, AutoRollback: true,
+		ClusterName: "demo-cluster", AuthHeader: "X-Forwarded-Email", ActionsEnabled: true, AutoRollback: true, GitRollback: true,
 		Static: web.FS(), Logger: slog.New(slog.NewTextHandler(os.Stderr, nil)),
 	})
 	addr := ":8099"
