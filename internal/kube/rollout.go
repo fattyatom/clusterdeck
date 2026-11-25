@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -545,6 +546,9 @@ func (c *Client) RollbackPR(ctx context.Context, appNS, appName, toRevision, use
 	if err != nil {
 		return "", err
 	}
+	if dest, _, _ := unstructured.NestedString(obj.Object, "spec", "destination", "namespace"); !c.actionAllowed(dest) {
+		return "", fmt.Errorf("%w: %s deploys to namespace %q, which is not in ACTIONS_NAMESPACES", ErrForbidden, appName, dest)
+	}
 	m := managerFromApp(argoApp{name: obj.GetName(), namespace: obj.GetNamespace(), obj: obj.Object})
 	if m.Source == nil {
 		return "", fmt.Errorf("%w: %s", ErrInvalid, m.SourceNote)
@@ -570,6 +574,13 @@ func (c *Client) RollbackPR(ctx context.Context, appNS, appName, toRevision, use
 		return fmt.Sprintf("a rollback pull request for this revision is already open: %s", pr.URL), nil
 	}
 	return fmt.Sprintf("opened pull request #%d: %s", pr.Number, pr.URL), nil
+}
+
+func (c *Client) actionAllowed(ns string) bool {
+	if len(c.ActionNamespaces) == 0 {
+		return true
+	}
+	return slices.Contains(c.ActionNamespaces, ns)
 }
 
 func (c *Client) AutoRollback(ctx context.Context, namespaces []string) ([]AutoRollbackResult, error) {
