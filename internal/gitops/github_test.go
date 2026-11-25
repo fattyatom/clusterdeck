@@ -161,7 +161,7 @@ func TestParseRepo(t *testing.T) {
 	if err := Supported(Source{RepoURL: "https://github.com/o/r", Path: "../x"}); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("path traversal: %v", err)
 	}
-	if got := BranchFor("Sure Testing", "abcdef123456"); got != "clusterdeck/rollback-sure-testing-abcdef1" {
+	if got := BranchFor("Sure Testing", "abcdef123456"); got != "clusterdeck/rollback-sure-testing-abcdef1-to-" {
 		t.Fatalf("branch = %s", got)
 	}
 }
@@ -208,7 +208,7 @@ func TestOpenRollback(t *testing.T) {
 
 	commit := f.posted["/git/commits"][0]
 	msg := commit["message"].(string)
-	if !strings.HasPrefix(msg, "Roll back shop to old1111\n") || !strings.Contains(msg, CommitTrailer) || !strings.Contains(msg, "me@example.com") {
+	if !strings.HasPrefix(msg, "Roll back shop to old1111\n") || !strings.Contains(msg, "\nClusterdeck-Rollback: shop\n") || !strings.Contains(msg, "me@example.com") {
 		t.Fatalf("message = %q", msg)
 	}
 	if parents := commit["parents"].([]any); len(parents) != 1 || parents[0] != "head2222bbbb" {
@@ -240,7 +240,10 @@ func TestOpenRollback(t *testing.T) {
 
 func TestOpenRollbackReturnsOpenPull(t *testing.T) {
 	f := newFake()
-	f.open = []map[string]any{{"number": 3, "html_url": "https://github.com/o/r/pull/3", "head": map[string]any{"ref": "clusterdeck/rollback-shop-head222-to-zzz"}}}
+	f.open = []map[string]any{
+		{"number": 2, "html_url": "https://github.com/o/r/pull/2", "head": map[string]any{"ref": "clusterdeck/rollback-shop-head222x-to-zzz"}},
+		{"number": 3, "html_url": "https://github.com/o/r/pull/3", "head": map[string]any{"ref": "clusterdeck/rollback-shop-head222-to-zzz"}},
+	}
 	pr, err := client(t, f).OpenRollback(context.Background(), request())
 	if err != nil || !pr.Existing || pr.Number != 3 {
 		t.Fatalf("pr = %+v err = %v", pr, err)
@@ -286,14 +289,50 @@ func TestRolledBackSince(t *testing.T) {
 	if landed, err := g.RolledBackSince(ctx, src, "shop", "old1111aaaa"); err != nil || landed {
 		t.Fatalf("landed = %v err = %v", landed, err)
 	}
-	for _, msg := range []string{"Roll back shop to old1111 (#7)", "Merge pull request #7\n\n" + CommitTrailer} {
+	for _, msg := range []string{"Roll back shop to old1111 (#7)", "Merge pull request #7\n\n" + TrailerFor("shop")} {
 		f.compare = map[string]any{"commits": []any{map[string]any{"sha": "x", "commit": map[string]any{"message": msg}}}}
 		if landed, _ := g.RolledBackSince(ctx, src, "shop", "old1111aaaa"); !landed {
 			t.Fatalf("%q should count as a landed rollback", msg)
 		}
 	}
-	f.compare = map[string]any{"commits": []any{map[string]any{"sha": "x", "commit": map[string]any{"message": "Roll back shopfront to abc"}}}}
-	if landed, _ := g.RolledBackSince(ctx, src, "shop", "old1111aaaa"); landed {
-		t.Fatal("another app's rollback must not count")
+	for _, msg := range []string{
+		"Roll back shopfront to abc",
+		"Roll back sure-testing to abc1234\n\nRestores apps/sure.\n\nClusterdeck-Rollback: sure-testing\n",
+		"Roll back shop-testing to abc1234\n\nClusterdeck-Rollback: shop-testing\n",
+	} {
+		f.compare = map[string]any{"commits": []any{map[string]any{"sha": "x", "commit": map[string]any{"message": msg}}}}
+		if landed, _ := g.RolledBackSince(ctx, src, "shop", "old1111aaaa"); landed {
+			t.Fatalf("another app's rollback must not count: %q", msg)
+		}
+	}
+}
+
+func TestOpenRollbackDeletesBranchWhenPullFails(t *testing.T) {
+	f := newFake()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/repos/o/r")
+		switch {
+		case r.Method == http.MethodPost && p == "/pulls":
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			w.Write([]byte(`{"message":"Validation Failed"}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(p, "/git/refs/heads/"):
+			f.mu.Lock()
+			delete(f.refs, strings.TrimPrefix(p, "/git/refs/heads/"))
+			f.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			f.ServeHTTP(w, r)
+		}
+	}))
+	defer srv.Close()
+	g := &GitHub{API: srv.URL, Token: "tok"}
+	if _, err := g.OpenRollback(context.Background(), request()); err == nil {
+		t.Fatal("want the pull request error")
+	}
+	if _, ok := f.refs["clusterdeck/rollback-shop-head222-to-old1111"]; ok {
+		t.Fatal("the branch must be deleted when the pull request cannot be opened, or it blocks every retry")
+	}
+	if _, err := g.OpenRollback(context.Background(), request()); errors.Is(err, ErrExists) {
+		t.Fatal("a retry must not be blocked by a leftover branch")
 	}
 }

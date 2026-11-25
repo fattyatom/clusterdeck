@@ -23,9 +23,9 @@ var (
 )
 
 const (
-	BranchPrefix  = "clusterdeck/rollback-"
-	CommitTrailer = "Clusterdeck-Rollback: true"
-	maxListed     = 30
+	BranchPrefix = "clusterdeck/rollback-"
+	TrailerKey   = "Clusterdeck-Rollback: "
+	maxListed    = 30
 )
 
 var githubRepo = regexp.MustCompile(`^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$`)
@@ -91,7 +91,21 @@ func slug(s string) string {
 }
 
 func BranchFor(app, from string) string {
-	return BranchPrefix + slug(app) + "-" + short(from)
+	return BranchPrefix + slug(app) + "-" + short(from) + "-to-"
+}
+
+func TrailerFor(app string) string {
+	return TrailerKey + app
+}
+
+func hasTrailer(message, app string) bool {
+	want := TrailerFor(app)
+	for _, line := range strings.Split(message, "\n") {
+		if strings.TrimSpace(line) == want {
+			return true
+		}
+	}
+	return false
 }
 
 type apiError struct {
@@ -297,7 +311,7 @@ func (g *GitHub) RolledBackSince(ctx context.Context, src Source, app, since str
 	}
 	prefix := fmt.Sprintf("Roll back %s to ", app)
 	for _, c := range cmp.Commits {
-		if strings.HasPrefix(c.Commit.Message, prefix) || strings.Contains(c.Commit.Message, CommitTrailer) {
+		if strings.HasPrefix(c.Commit.Message, prefix) || hasTrailer(c.Commit.Message, app) {
 			return true, nil
 		}
 	}
@@ -380,7 +394,7 @@ func (g *GitHub) OpenRollback(ctx context.Context, req Request) (*PullRequest, e
 	if req.Auto {
 		trigger = "Opened automatically: " + req.Reason
 	}
-	message := fmt.Sprintf("%s\n\nRestores %s to its state at %s. %s.\n\n%s\n", TitleFor(req.App, req.ToRevision), dir, req.ToRevision, trigger, CommitTrailer)
+	message := fmt.Sprintf("%s\n\nRestores %s to its state at %s. %s.\n\n%s\n", TitleFor(req.App, req.ToRevision), dir, req.ToRevision, trigger, TrailerFor(req.App))
 	var commit struct {
 		SHA string `json:"sha"`
 	}
@@ -388,7 +402,7 @@ func (g *GitHub) OpenRollback(ctx context.Context, req Request) (*PullRequest, e
 		return nil, err
 	}
 
-	branch := branchPrefix + "-to-" + short(req.ToRevision)
+	branch := branchPrefix + short(req.ToRevision)
 	if err := g.do(ctx, http.MethodPost, repo+"/git/refs", map[string]any{"ref": "refs/heads/" + branch, "sha": commit.SHA}, nil); err != nil {
 		if isStatus(err, http.StatusUnprocessableEntity) {
 			return nil, fmt.Errorf("%w: branch %s already exists (a closed pull request leaves its branch until deleted)", ErrExists, branch)
@@ -402,6 +416,9 @@ func (g *GitHub) OpenRollback(ctx context.Context, req Request) (*PullRequest, e
 		"title": TitleFor(req.App, req.ToRevision),
 		"head":  branch, "base": base, "body": body,
 	}, &pr); err != nil {
+		if delErr := g.do(ctx, http.MethodDelete, repo+"/git/refs/heads/"+branch, nil, nil); delErr != nil {
+			return nil, fmt.Errorf("%w (and deleting branch %s failed: %v)", err, branch, delErr)
+		}
 		return nil, err
 	}
 	return &PullRequest{Number: pr.Number, URL: pr.HTMLURL, Branch: branch}, nil
