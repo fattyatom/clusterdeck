@@ -26,6 +26,10 @@ func TestValidation(t *testing.T) {
 		"unknown provider":         {"METRICS_PROVIDER": "datadog"},
 		"auto rollback alone":      {"AUTO_ROLLBACK_ENABLED": "true"},
 		"interval too short":       {"AUTO_ROLLBACK_INTERVAL": "1s"},
+		"oidc half set":            {"OIDC_ISSUER_URL": "https://id", "OIDC_CLIENT_ID": "c"},
+		"oidc and header":          {"AUTH_HEADER": "X-User", "OIDC_ISSUER_URL": "https://id", "OIDC_CLIENT_ID": "c", "OIDC_CLIENT_SECRET": "s", "OIDC_REDIRECT_URL": "https://d/auth/callback"},
+		"short session secret":     {"SESSION_SECRET": "short"},
+		"session ttl too short":    {"SESSION_TTL": "1m"},
 	}
 	for name, e := range cases {
 		if _, err := FromEnv(env(e)); err == nil {
@@ -57,5 +61,24 @@ func TestFullConfig(t *testing.T) {
 	}
 	if !c.ActionsEnabled || len(c.AllowedUsers) != 2 || c.AllowedUsers[1] != "b@x.io" {
 		t.Fatalf("config = %+v", c)
+	}
+}
+
+func TestOIDCConfig(t *testing.T) {
+	c, err := FromEnv(env(map[string]string{
+		"ACTIONS_ENABLED":    "true",
+		"OIDC_ISSUER_URL":    "https://id.example.com",
+		"OIDC_CLIENT_ID":     "c",
+		"OIDC_CLIENT_SECRET": "s",
+		"OIDC_REDIRECT_URL":  "https://deck.example.com/auth/callback",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.OIDC() || c.OIDCUserClaim != "email" || len(c.OIDCScopes) != 3 || c.SessionTTL.Hours() != 12 || c.SessionSecret != "" {
+		t.Fatalf("oidc config = %+v", c)
+	}
+	if d, _ := FromEnv(env(nil)); d.OIDC() {
+		t.Fatal("OIDC is on by default")
 	}
 }

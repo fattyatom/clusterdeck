@@ -36,6 +36,7 @@ jobs:
       - uses: azure/setup-helm@v4
       - run: helm lint deploy/helm/clusterdeck
       - run: helm template t deploy/helm/clusterdeck --set actions.enabled=true --set auth.header=X-Forwarded-Email > /dev/null
+      - run: helm template t deploy/helm/clusterdeck --set actions.enabled=true --set auth.oidc.issuerURL=https://id.example.com --set auth.oidc.clientID=c --set auth.oidc.redirectURL=https://d.example.com/auth/callback --set auth.oidc.existingSecret=s > /dev/null
 
   image:
     needs: test

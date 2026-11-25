@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/fattyatom/clusterdeck/internal/auth"
 	"github.com/fattyatom/clusterdeck/internal/config"
 	"github.com/fattyatom/clusterdeck/internal/gitops"
 	"github.com/fattyatom/clusterdeck/internal/kube"
@@ -70,7 +71,7 @@ func run(logger *slog.Logger) error {
 		provider = &metrics.Prometheus{URL: cfg.PrometheusURL}
 	}
 
-	handler := server.New(cluster, provider, server.Options{
+	opts := server.Options{
 		ClusterName:    cfg.ClusterName,
 		AuthHeader:     cfg.AuthHeader,
 		AllowedUsers:   cfg.AllowedUsers,
@@ -79,7 +80,25 @@ func run(logger *slog.Logger) error {
 		GitRollback:    cluster.Git != nil,
 		Static:         web.FS(),
 		Logger:         logger,
-	})
+	}
+	if cfg.OIDC() {
+		login, err := auth.New(auth.Config{
+			IssuerURL:     cfg.OIDCIssuerURL,
+			ClientID:      cfg.OIDCClientID,
+			ClientSecret:  cfg.OIDCClientSecret,
+			RedirectURL:   cfg.OIDCRedirectURL,
+			UserClaim:     cfg.OIDCUserClaim,
+			Scopes:        cfg.OIDCScopes,
+			SessionSecret: []byte(cfg.SessionSecret),
+			SessionTTL:    cfg.SessionTTL,
+			Logger:        logger,
+		})
+		if err != nil {
+			return err
+		}
+		opts.Login = login
+	}
+	handler := server.New(cluster, provider, opts)
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -93,7 +112,7 @@ func run(logger *slog.Logger) error {
 	if cfg.AutoRollback {
 		go autoRollback(ctx, cluster, cfg.ActionsNamespaces, cfg.AutoRollbackInterval, logger)
 	}
-	logger.Info("listening", "addr", cfg.ListenAddr, "metrics", provider.Name(), "actions", cfg.ActionsEnabled)
+	logger.Info("listening", "addr", cfg.ListenAddr, "metrics", provider.Name(), "actions", cfg.ActionsEnabled, "oidc", cfg.OIDC())
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
