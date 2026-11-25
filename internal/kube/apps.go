@@ -41,6 +41,7 @@ type ArgoStatus struct {
 type App struct {
 	Name      string       `json:"name"`
 	Namespace string       `json:"namespace"`
+	PartOf    string       `json:"partOf,omitempty"`
 	Healthy   bool         `json:"healthy"`
 	Restarts  int32        `json:"restarts"`
 	Workloads []Workload   `json:"workloads"`
@@ -118,6 +119,12 @@ func (c *Client) Apps(ctx context.Context) ([]App, error) {
 				app.Argo = []ArgoStatus{}
 			}
 			apps[key] = app
+		}
+		if app.PartOf == "" {
+			app.PartOf = src.template.Labels[PartOfLabel]
+			if app.PartOf == "" {
+				app.PartOf = src.meta.Labels[PartOfLabel]
+			}
 		}
 		w := Workload{Kind: src.kind, Name: src.meta.Name, Ready: src.ready, Desired: src.desired, Images: []string{}, Pods: []PodInfo{}}
 		for _, ctr := range src.template.Spec.Containers {

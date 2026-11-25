@@ -137,3 +137,40 @@ export function autoRollbackText(rollout, enabledInstall) {
   if (rollout.rollback.mode === "pull-request") return `Auto-rollback is on: a failing revision opens a rollback pull request after ${rollout.rollback.grace}, or as soon as its progress deadline passes. Merging it is up to you.`;
   return `Auto-rollback is on: a failing revision is rolled back after ${rollout.rollback.grace}, or as soon as its progress deadline passes.`;
 }
+
+const ENV_SUFFIX = /-(testing|test|staging|stage|dev|qa|uat|preview|canary|sandbox|prod|production)$/;
+
+// envOf names the environment a namespace belongs to, read from its suffix ("nextexplorer-testing" → "testing").
+export function envOf(namespace) {
+  return String(namespace ?? "").match(ENV_SUFFIX)?.[1] ?? "";
+}
+
+// appGroup is the application an app card belongs to across environments: its
+// app.kubernetes.io/part-of label, or else its namespace without the environment suffix.
+export function appGroup(app) {
+  return app.partOf || String(app.namespace ?? "").replace(ENV_SUFFIX, "");
+}
+
+// groupApps buckets apps by "app" (application across environments), "namespace", or "none".
+// Groups are sorted by name; within one, the unsuffixed environment comes first.
+export function groupApps(apps, by) {
+  if (by === "none") return [{ key: "", apps }];
+  const keyOf = by === "namespace" ? (a) => a.namespace : appGroup;
+  const groups = new Map();
+  for (const a of apps) {
+    const k = keyOf(a);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(a);
+  }
+  const rank = (a) => [envOf(a.namespace), a.namespace, a.name];
+  return [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, list]) => ({
+      key,
+      apps: list.slice().sort((x, y) => {
+        const [ex, nx, ax] = rank(x);
+        const [ey, ny, ay] = rank(y);
+        return ex.localeCompare(ey) || nx.localeCompare(ny) || ax.localeCompare(ay);
+      }),
+    }));
+}
