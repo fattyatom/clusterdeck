@@ -8,6 +8,15 @@ clusterName: cluster
 auth:
   header: ""
   allowedUsers: []
+  oidc:
+    issuerURL: ""
+    clientID: ""
+    redirectURL: ""
+    userClaim: email
+    scopes: [openid, email, profile]
+    existingSecret: ""
+    clientSecretKey: client-secret
+    sessionSecretKey: ""
 
 actions:
   enabled: false

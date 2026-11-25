@@ -30,9 +30,42 @@ kubectl -n clusterdeck port-forward svc/clusterdeck 8080:80
 ```
 
 This is read-only and anonymous, which is fine behind a port-forward. Before
-exposing it, put it behind an authenticating proxy (oauth2-proxy, Pomerium,
-Authelia, Traefik forward-auth, ...) and tell clusterdeck which header carries
-the user:
+exposing it, give it an identity: either its own OpenID Connect login, or an
+authenticating proxy in front of it.
+
+### OpenID Connect login
+
+Register clusterdeck as a confidential client with your identity provider
+(Pocket ID, Authelia, Keycloak, Dex, ...), with the redirect URL
+`https://<your host>/auth/callback`, and put the client secret in a Secret:
+
+```yaml
+auth:
+  allowedUsers: [you@example.com]
+  oidc:
+    issuerURL: https://id.example.com
+    clientID: clusterdeck
+    redirectURL: https://deck.example.com/auth/callback
+    existingSecret: clusterdeck-oidc
+    clientSecretKey: client-secret
+```
+
+clusterdeck runs the authorization code flow with PKCE, checks the ID token's
+signature, issuer, audience, expiry and nonce, and keeps the user in a signed,
+`HttpOnly`, `SameSite=Lax` session cookie (12 h by default, `SESSION_TTL`).
+The user is the `email` claim (`auth.oidc.userClaim`), and an email the
+provider marks unverified is refused. Every page and API call then needs a
+session; `/healthz` does not.
+
+The cookie is signed with `SESSION_SECRET` (at least 32 characters, from
+`auth.oidc.sessionSecretKey`). Without one, each start picks a random key, so
+a restart signs everyone out; with single sign-on at the provider that only
+costs a redirect.
+
+### Authenticating proxy
+
+Or put it behind oauth2-proxy, Pomerium, Authelia, Traefik forward-auth, ...
+and tell clusterdeck which header carries the user:
 
 ```yaml
 auth:
@@ -201,7 +234,10 @@ The binary reads environment variables; the chart sets them from values.
 | `CLUSTER_NAME` | `cluster` |
 | `KUBECONFIG` | in-cluster config |
 | `AUTH_HEADER`, `AUTH_ALLOWED_USERS` | empty: anonymous, read-only |
-| `ACTIONS_ENABLED` | `false`; needs `AUTH_HEADER` |
+| `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL` | empty: no login; all four or none, and not with `AUTH_HEADER` |
+| `OIDC_USER_CLAIM`, `OIDC_SCOPES` | `email`, `openid,email,profile` |
+| `SESSION_SECRET`, `SESSION_TTL` | random per start, `12h` |
+| `ACTIONS_ENABLED` | `false`; needs `AUTH_HEADER` or OIDC login |
 | `ACTIONS_NAMESPACES` | empty: all namespaces (auto-rollback scope and the Applications a rollback pull request may target, by destination namespace; the chart also scopes RBAC to it) |
 | `AUTO_ROLLBACK_ENABLED`, `AUTO_ROLLBACK_INTERVAL` | `false`, `30s`; needs `ACTIONS_ENABLED` |
 | `GITHUB_TOKEN`, `GITHUB_API_URL` | empty (no rollback by pull request), `https://api.github.com` |

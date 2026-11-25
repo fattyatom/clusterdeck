@@ -257,3 +257,67 @@ func TestRollbackPR(t *testing.T) {
 		t.Fatalf("read-only: %d", rec.Code)
 	}
 }
+
+type fakeLogin struct{}
+
+func (fakeLogin) User(r *http.Request) string {
+	if c, err := r.Cookie("s"); err == nil {
+		return c.Value
+	}
+	return ""
+}
+func (fakeLogin) LoginURL(next string) string { return "/auth/login?next=" + next }
+func (fakeLogin) Routes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /auth/login", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("login page")) })
+}
+
+func withSession(user string) map[string]string {
+	return map[string]string{"Cookie": "s=" + user, "X-Requested-With": "clusterdeck"}
+}
+
+func TestLogin(t *testing.T) {
+	s, fc, _, logs := newServer(Options{Login: fakeLogin{}, ActionsEnabled: true, AllowedUsers: []string{"me@example.com"}})
+
+	rec := do(s, "GET", "/api/overview", "", nil)
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), `"login":"/auth/login?next=/"`) {
+		t.Fatalf("api without a session: %d %s", rec.Code, rec.Body)
+	}
+	rec = do(s, "GET", "/index.html?x=1", "", nil)
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/auth/login?next=/index.html?x=1" {
+		t.Fatalf("page without a session: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if rec := do(s, "GET", "/auth/login", "", nil); rec.Code != http.StatusOK || rec.Body.String() != "login page" {
+		t.Fatalf("login routes must be reachable without a session: %d", rec.Code)
+	}
+	if rec := do(s, "GET", "/healthz", "", nil); rec.Code != http.StatusOK {
+		t.Fatalf("healthz: %d", rec.Code)
+	}
+	if rec := do(s, "GET", "/api/overview", "", map[string]string{"X-Forwarded-Email": "me@example.com"}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("an identity header must be ignored when login is on: %d", rec.Code)
+	}
+	if rec := do(s, "GET", "/api/overview", "", withSession("other@example.com")); rec.Code != http.StatusForbidden {
+		t.Fatalf("not on the allowlist: %d", rec.Code)
+	}
+
+	var cfg map[string]any
+	json.Unmarshal(do(s, "GET", "/api/config", "", withSession("me@example.com")).Body.Bytes(), &cfg)
+	if cfg["user"] != "me@example.com" || cfg["actionsEnabled"] != true || cfg["logout"] != "/auth/logout" {
+		t.Fatalf("config = %v", cfg)
+	}
+	rec = do(s, "POST", "/api/cronjobs/shop/db-backup/run", "", withSession("me@example.com"))
+	if rec.Code != http.StatusOK || fc.ranCronJob != "shop/db-backup by me@example.com" || !strings.Contains(logs.String(), `"user":"me@example.com"`) {
+		t.Fatalf("action as a signed-in user: %d %q", rec.Code, fc.ranCronJob)
+	}
+}
+
+func TestNoLogoutWithoutLogin(t *testing.T) {
+	s, _, _, _ := newServer(Options{AuthHeader: "X-Forwarded-Email"})
+	var cfg map[string]any
+	json.Unmarshal(do(s, "GET", "/api/config", "", authed).Body.Bytes(), &cfg)
+	if cfg["logout"] != "" {
+		t.Fatalf("config = %v", cfg)
+	}
+	if rec := do(s, "GET", "/auth/login", "", authed); rec.Code == http.StatusOK && rec.Body.String() == "login page" {
+		t.Fatal("login routes exist without login")
+	}
+}

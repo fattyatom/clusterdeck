@@ -1,8 +1,11 @@
 {{- if and .Values.actions.autoRollback.enabled (not .Values.actions.enabled) }}
 {{- fail "actions.autoRollback.enabled needs actions.enabled" }}
 {{- end }}
-{{- if and .Values.actions.enabled (not .Values.auth.header) }}
-{{- fail "actions.enabled needs auth.header: actions are only allowed for an identified user" }}
+{{- if and .Values.actions.enabled (not .Values.auth.header) (not .Values.auth.oidc.issuerURL) }}
+{{- fail "actions.enabled needs auth.header or auth.oidc: actions are only allowed for an identified user" }}
+{{- end }}
+{{- if and .Values.auth.header .Values.auth.oidc.issuerURL }}
+{{- fail "set auth.header or auth.oidc, not both" }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -33,6 +36,27 @@ spec:
             - {name: CLUSTER_NAME, value: {{ .Values.clusterName | quote }}}
             - {name: AUTH_HEADER, value: {{ .Values.auth.header | quote }}}
             - {name: AUTH_ALLOWED_USERS, value: {{ join "," .Values.auth.allowedUsers | quote }}}
+            {{- with .Values.auth.oidc }}
+            {{- if .issuerURL }}
+            - {name: OIDC_ISSUER_URL, value: {{ .issuerURL | quote }}}
+            - {name: OIDC_CLIENT_ID, value: {{ required "auth.oidc.clientID is required" .clientID | quote }}}
+            - {name: OIDC_REDIRECT_URL, value: {{ required "auth.oidc.redirectURL is required" .redirectURL | quote }}}
+            - {name: OIDC_USER_CLAIM, value: {{ .userClaim | quote }}}
+            - {name: OIDC_SCOPES, value: {{ join "," .scopes | quote }}}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "auth.oidc.existingSecret is required" .existingSecret }}
+                  key: {{ .clientSecretKey }}
+            {{- if .sessionSecretKey }}
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .existingSecret }}
+                  key: {{ .sessionSecretKey }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             - {name: ACTIONS_ENABLED, value: {{ .Values.actions.enabled | quote }}}
             - {name: ACTIONS_NAMESPACES, value: {{ join "," .Values.actions.namespaces | quote }}}
             - {name: AUTO_ROLLBACK_ENABLED, value: {{ .Values.actions.autoRollback.enabled | quote }}}

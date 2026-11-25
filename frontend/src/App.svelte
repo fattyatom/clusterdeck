@@ -43,7 +43,7 @@
       <a href="#{id}" class:active={activeTab === id} aria-current={activeTab === id ? "page" : undefined}>{label}</a>
     {/each}
   </nav>
-  {#if config}<div class="who">{config.user}{config.actionsEnabled ? "" : " · read-only"}</div>{/if}
+  {#if config}<div class="who">{config.user}{config.actionsEnabled ? "" : " · read-only"}{#if config.logout} · <a href={config.logout}>Sign out</a>{/if}</div>{/if}
 </header>
 
 <main>
