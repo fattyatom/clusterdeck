@@ -47,6 +47,8 @@ type Client struct {
 	Git     GitRollbacker
 	Now     func() time.Time
 
+	ActionNamespaces []string
+
 	hidden          map[string]bool
 	cronRoles       map[string]labels.Selector
 	restoreSelector string

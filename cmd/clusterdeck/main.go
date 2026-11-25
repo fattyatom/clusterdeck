@@ -59,6 +59,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	cluster.ActionNamespaces = cfg.ActionsNamespaces
 	if cfg.GitHubToken != "" {
 		cluster.Git = &gitops.GitHub{API: cfg.GitHubAPIURL, Token: cfg.GitHubToken}
 	}

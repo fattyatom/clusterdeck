@@ -170,6 +170,10 @@ gitops:
 The pod also needs outbound HTTPS to `api.github.com` (or your
 `gitops.github.apiURL`).
 
+RBAC cannot scope a pull request, so with `actions.namespaces` set,
+clusterdeck itself refuses a rollback pull request for an Application whose
+destination namespace is not in that list.
+
 ### Auto-rollback
 
 **Auto-rollback** is opt-in twice: the install needs
@@ -234,7 +238,7 @@ The binary reads environment variables; the chart sets them from values.
 | `OIDC_USER_CLAIM`, `OIDC_SCOPES` | `email`, `openid,email,profile` |
 | `SESSION_SECRET`, `SESSION_TTL` | random per start, `12h` |
 | `ACTIONS_ENABLED` | `false`; needs `AUTH_HEADER` or OIDC login |
-| `ACTIONS_NAMESPACES` | empty: all namespaces (auto-rollback scope; the chart also scopes RBAC to it) |
+| `ACTIONS_NAMESPACES` | empty: all namespaces (auto-rollback scope and the Applications a rollback pull request may target, by destination namespace; the chart also scopes RBAC to it) |
 | `AUTO_ROLLBACK_ENABLED`, `AUTO_ROLLBACK_INTERVAL` | `false`, `30s`; needs `ACTIONS_ENABLED` |
 | `GITHUB_TOKEN`, `GITHUB_API_URL` | empty (no rollback by pull request), `https://api.github.com` |
 | `HIDE_NAMESPACES` | `kube-system,kube-public,kube-node-lease` (Apps tab only) |

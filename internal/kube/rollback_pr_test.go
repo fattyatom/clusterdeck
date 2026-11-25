@@ -121,6 +121,26 @@ func TestRollbackPR(t *testing.T) {
 	}
 }
 
+func TestRollbackPRRespectsActionNamespaces(t *testing.T) {
+	ctx := context.Background()
+	git := &fakeGit{}
+	c, _ := newClient(t, argoDyn(t, gitApp(homelabSource, nil)), rolloutDeployment(2, nil), rs(1, "web:1", time.Hour), rs(2, "web:2", time.Minute))
+	c.Git = git
+
+	c.ActionNamespaces = []string{"photos-testing"}
+	if _, err := c.RollbackPR(ctx, "argocd", "shop", "", "me"); !errors.Is(err, ErrForbidden) || !strings.Contains(err.Error(), "ACTIONS_NAMESPACES") {
+		t.Fatalf("an app outside ACTIONS_NAMESPACES: %v", err)
+	}
+	if len(git.opened) != 0 {
+		t.Fatal("a pull request was opened for an app outside ACTIONS_NAMESPACES")
+	}
+
+	c.ActionNamespaces = []string{"photos-testing", "shop"}
+	if _, err := c.RollbackPR(ctx, "argocd", "shop", "", "me"); err != nil || len(git.opened) != 1 {
+		t.Fatalf("an app inside ACTIONS_NAMESPACES: %v", err)
+	}
+}
+
 func TestAutoRollbackByPR(t *testing.T) {
 	ctx := context.Background()
 	opted := map[string]string{AnnAutoRollback: "true"}
