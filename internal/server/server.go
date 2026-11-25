@@ -31,9 +31,16 @@ type Cluster interface {
 	RollbackPR(ctx context.Context, appNS, app, toRevision, user string) (string, error)
 }
 
+type Login interface {
+	User(r *http.Request) string
+	LoginURL(next string) string
+	Routes(mux *http.ServeMux)
+}
+
 type Options struct {
 	ClusterName    string
 	AuthHeader     string
+	Login          Login
 	AllowedUsers   []string
 	ActionsEnabled bool
 	AutoRollback   bool
@@ -79,6 +86,9 @@ func New(cluster Cluster, provider metrics.Provider, opts Options) *Server {
 	}
 
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	if opts.Login != nil {
+		opts.Login.Routes(s.mux)
+	}
 	s.mux.Handle("GET /api/config", s.read(s.handleConfig))
 	s.mux.Handle("GET /api/overview", s.read(s.handleOverview))
 	s.mux.Handle("GET /api/apps", s.read(s.handleApps))
@@ -116,10 +126,15 @@ func userFrom(r *http.Request) string {
 }
 
 func (s *Server) identify(r *http.Request) (string, int) {
-	if s.opts.AuthHeader == "" {
+	var user string
+	switch {
+	case s.opts.Login != nil:
+		user = s.opts.Login.User(r)
+	case s.opts.AuthHeader != "":
+		user = strings.TrimSpace(r.Header.Get(s.opts.AuthHeader))
+	default:
 		return anonymous, 0
 	}
-	user := strings.TrimSpace(r.Header.Get(s.opts.AuthHeader))
 	if user == "" {
 		return "", http.StatusUnauthorized
 	}
@@ -132,6 +147,14 @@ func (s *Server) identify(r *http.Request) (string, int) {
 func (s *Server) authenticated(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, status := s.identify(r)
+		if status == http.StatusUnauthorized && s.opts.Login != nil {
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				writeJSON(w, status, map[string]string{"error": "sign in required", "login": s.opts.Login.LoginURL("/")})
+			} else {
+				http.Redirect(w, r, s.opts.Login.LoginURL(r.URL.RequestURI()), http.StatusFound)
+			}
+			return
+		}
 		if status != 0 {
 			http.Error(w, http.StatusText(status), status)
 			return
@@ -208,8 +231,16 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) error {
 		"autoRollback":    s.opts.AutoRollback,
 		"gitRollback":     s.opts.GitRollback,
 		"panels":          metrics.Panels,
+		"logout":          s.logoutPath(),
 	})
 	return nil
+}
+
+func (s *Server) logoutPath() string {
+	if s.opts.Login == nil {
+		return ""
+	}
+	return "/auth/logout"
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) error {

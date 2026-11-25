@@ -71,8 +71,11 @@ cluster. The break-glass path stays `kubectl`.
   someone has already declared: a CronJob carrying the backup label, or a
   ConfigMap carrying the restore-template label. Whoever can write those
   objects decides what clusterdeck may run, so keep them in git.
-- Identity comes from a header set by an authenticating proxy. Enable the
-  NetworkPolicy so nothing else can reach the pod and forge it.
+- Identity comes from clusterdeck's own OpenID Connect login, or from a
+  header set by an authenticating proxy. With the header, enable the
+  NetworkPolicy so nothing else can reach the pod and forge it. With OIDC
+  login the header is ignored, and the session cookie is only as safe as
+  `SESSION_SECRET` and TLS on the route.
 - Actions need an identified user and a same-origin request header, and are
   logged as JSON (`"msg":"action"`) with the user, path and result.
 
@@ -99,7 +102,6 @@ cluster.
 - Listing backup files to pick from. Today `DUMP`-style parameters are typed
   in. Listing needs a read-only mount of the backup volume, or a small
   sidecar that serves the listing.
-- Built-in OIDC for clusters without an auth proxy.
 - Velero and CloudNativePG `Backup` resources as backup sources, beside
   CronJobs.
 - Rollback for StatefulSets and DaemonSets (ControllerRevisions).

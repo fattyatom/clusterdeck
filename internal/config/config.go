@@ -29,7 +29,17 @@ type Config struct {
 	PrometheusURL           string
 	GitHubToken             string
 	GitHubAPIURL            string
+	OIDCIssuerURL           string
+	OIDCClientID            string
+	OIDCClientSecret        string
+	OIDCRedirectURL         string
+	OIDCUserClaim           string
+	OIDCScopes              []string
+	SessionSecret           string
+	SessionTTL              time.Duration
 }
+
+func (c *Config) OIDC() bool { return c.OIDCIssuerURL != "" }
 
 func FromEnv(getenv func(string) string) (*Config, error) {
 	get := func(key, def string) string {
@@ -56,6 +66,13 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 		PrometheusURL:           get("PROMETHEUS_URL", ""),
 		GitHubToken:             get("GITHUB_TOKEN", ""),
 		GitHubAPIURL:            get("GITHUB_API_URL", "https://api.github.com"),
+		OIDCIssuerURL:           get("OIDC_ISSUER_URL", ""),
+		OIDCClientID:            get("OIDC_CLIENT_ID", ""),
+		OIDCClientSecret:        get("OIDC_CLIENT_SECRET", ""),
+		OIDCRedirectURL:         get("OIDC_REDIRECT_URL", ""),
+		OIDCUserClaim:           get("OIDC_USER_CLAIM", "email"),
+		OIDCScopes:              list(get("OIDC_SCOPES", "openid,email,profile")),
+		SessionSecret:           get("SESSION_SECRET", ""),
 	}
 	var err error
 	if c.ActionsEnabled, err = strconv.ParseBool(get("ACTIONS_ENABLED", "false")); err != nil {
@@ -70,8 +87,21 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 	if c.AutoRollback && !c.ActionsEnabled {
 		return nil, fmt.Errorf("AUTO_ROLLBACK_ENABLED=true needs ACTIONS_ENABLED=true")
 	}
-	if c.ActionsEnabled && c.AuthHeader == "" {
-		return nil, fmt.Errorf("ACTIONS_ENABLED=true needs AUTH_HEADER: actions are only allowed for an identified user")
+	if c.SessionTTL, err = time.ParseDuration(get("SESSION_TTL", "12h")); err != nil || c.SessionTTL < 5*time.Minute {
+		return nil, fmt.Errorf("SESSION_TTL must be a duration of at least 5m")
+	}
+	oidcSet := c.OIDCIssuerURL != "" || c.OIDCClientID != "" || c.OIDCClientSecret != "" || c.OIDCRedirectURL != ""
+	if oidcSet && (c.OIDCIssuerURL == "" || c.OIDCClientID == "" || c.OIDCClientSecret == "" || c.OIDCRedirectURL == "") {
+		return nil, fmt.Errorf("OIDC login needs all of OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_REDIRECT_URL")
+	}
+	if oidcSet && c.AuthHeader != "" {
+		return nil, fmt.Errorf("set AUTH_HEADER or OIDC_ISSUER_URL, not both: they are two ways to identify the user")
+	}
+	if c.SessionSecret != "" && len(c.SessionSecret) < 32 {
+		return nil, fmt.Errorf("SESSION_SECRET must be at least 32 characters")
+	}
+	if c.ActionsEnabled && c.AuthHeader == "" && !oidcSet {
+		return nil, fmt.Errorf("ACTIONS_ENABLED=true needs AUTH_HEADER or OIDC login: actions are only allowed for an identified user")
 	}
 	switch c.MetricsProvider {
 	case "none":
