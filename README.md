@@ -145,10 +145,26 @@ history gets a **Rollback PR to this** button.
 The pull request restores the Application's `spec.source.path` to exactly what
 it was at the chosen synced commit: changed files go back, files added since
 are deleted, and nothing outside the path changes. It targets the
-Application's `targetRevision` branch (the default branch for `HEAD`), and its
-description lists the files restored, the commits since, and files changed
-outside the path that it did **not** revert, such as a shared kustomize base.
+Application's `targetRevision` branch (the default branch for `HEAD`).
 Nothing changes in the cluster until you merge it and Argo CD syncs.
+
+Its description lists, each cut at 30 entries with "… and N more":
+
+- **Files restored**: every file under the path that goes back or is deleted.
+- **Not reverted**: files outside the path that changed since the chosen
+  commit and that the Application can render from. clusterdeck reads the
+  path's kustomization at the chosen commit and at the branch head and
+  follows `resources`, `components`, `bases`, `patches`, generator `files`
+  and the like, recursively and through relative paths such as `../base`. A
+  referenced directory without a kustomization counts as a whole; remote
+  references are skipped. When the path has no kustomization, or it cannot be
+  read, the list falls back to changed files in the path's parent folder and
+  its heading says so. GitHub reports at most 300 changed files per
+  comparison; the description notes when that limit was hit.
+- **Commits since**: commits on the branch after the chosen commit that
+  touched the path or one of the files under *Not reverted* (the first 10
+  of them), or, in the fallback, the parent folder. Other commits in a
+  monorepo are left out.
 
 | Supported | Not supported (the page says why) |
 |---|---|
