@@ -1,7 +1,7 @@
 <script>
   import { api, post } from "../lib/api.js";
   import { appHref, envOf, groupApps, matchesApp } from "../lib/format.js";
-  import { act, show } from "../lib/notify.svelte.js";
+  import { act, ask, show } from "../lib/notify.svelte.js";
   import Badge from "../components/Badge.svelte";
 
   let { config } = $props();
@@ -38,8 +38,8 @@
     }
   }
 
-  function restart(ns, w) {
-    if (confirm(`Restart ${w.kind} ${ns}/${w.name}?`)) act("Restart", () => post(`/api/workloads/${ns}/${w.kind.toLowerCase()}/${w.name}/restart`));
+  async function restart(ns, w) {
+    if (await ask("Rolling restart", `Restart ${w.kind} ${ns}/${w.name}?`, "Restart")) act("Restart", () => post(`/api/workloads/${ns}/${w.kind.toLowerCase()}/${w.name}/restart`));
   }
 </script>
 

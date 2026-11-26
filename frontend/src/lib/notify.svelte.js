@@ -16,3 +16,20 @@ export async function act(label, fn) {
     return false;
   }
 }
+
+export const confirmDialog = $state({ open: false, title: "", text: "", label: "Confirm", resolve: null });
+
+// ask shows an in-page confirmation and resolves true only if the user confirms it.
+export function ask(title, text, label = "Confirm") {
+  confirmDialog.resolve?.(false);
+  return new Promise((resolve) => {
+    Object.assign(confirmDialog, { open: true, title, text, label, resolve });
+  });
+}
+
+export function settle(ok) {
+  const r = confirmDialog.resolve;
+  confirmDialog.resolve = null;
+  confirmDialog.open = false;
+  r?.(ok);
+}
