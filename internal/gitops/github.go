@@ -26,6 +26,9 @@ const (
 	BranchPrefix = "clusterdeck/rollback-"
 	TrailerKey   = "Clusterdeck-Rollback: "
 	maxListed    = 30
+
+	maxPathQueries  = 10
+	maxCompareFiles = 300
 )
 
 var githubRepo = regexp.MustCompile(`^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$`)
@@ -447,46 +450,143 @@ func (g *GitHub) describe(ctx context.Context, repo string, req Request, dir, ba
 	}
 
 	var cmp struct {
-		Commits []struct {
-			SHA    string `json:"sha"`
-			Commit struct {
-				Message string `json:"message"`
-			} `json:"commit"`
-		} `json:"commits"`
-		Files []struct {
+		TotalCommits int      `json:"total_commits"`
+		Commits      []commit `json:"commits"`
+		Files        []struct {
 			Filename string `json:"filename"`
 		} `json:"files"`
 	}
-	if err := g.do(ctx, http.MethodGet, repo+"/compare/"+url.PathEscape(req.ToRevision)+"..."+url.PathEscape(base), nil, &cmp); err == nil {
-		if len(cmp.Commits) > 0 {
-			b.WriteString("\n### Commits on " + base + " since then\n\n")
-			for i, c := range cmp.Commits {
-				if i == maxListed {
-					fmt.Fprintf(&b, "- … and %d more\n", len(cmp.Commits)-maxListed)
-					break
-				}
-				title, _, _ := strings.Cut(c.Commit.Message, "\n")
-				fmt.Fprintf(&b, "- `%s` %s\n", short(c.SHA), title)
-			}
-		}
-		var outside []string
+	cmpErr := g.do(ctx, http.MethodGet, repo+"/compare/"+url.PathEscape(req.ToRevision)+"..."+url.PathEscape(base), nil, &cmp)
+
+	parent := path.Dir(dir)
+	if parent == "." {
+		parent = ""
+	}
+	rendered, resolveErr := g.renderedFrom(ctx, repo, dir, base, req.ToRevision)
+	var outside []string
+	if cmpErr == nil {
 		for _, f := range cmp.Files {
-			if !strings.HasPrefix(f.Filename, dir+"/") {
+			if strings.HasPrefix(f.Filename, dir+"/") {
+				continue
+			}
+			if resolveErr == nil && rendered.has(f.Filename) || resolveErr != nil && (parent == "" || strings.HasPrefix(f.Filename, parent+"/")) {
 				outside = append(outside, f.Filename)
 			}
 		}
-		if len(outside) > 0 {
-			b.WriteString("\n### Not reverted: changed since, outside the application's path\n\n")
-			b.WriteString("If the application includes any of these (a shared kustomize base, a values file), check whether they caused the failure.\n\n")
-			for i, f := range outside {
-				if i == maxListed {
-					fmt.Fprintf(&b, "- … and %d more\n", len(outside)-maxListed)
-					break
-				}
-				fmt.Fprintf(&b, "- `%s`\n", f)
+	}
+
+	paths := []string{dir}
+	skipped := 0
+	if resolveErr == nil {
+		for i, f := range outside {
+			if i == maxPathQueries {
+				skipped = len(outside) - maxPathQueries
+				break
 			}
+			paths = append(paths, f)
 		}
+	} else if parent != "" {
+		paths = append(paths, parent)
+	}
+	var inRange map[string]bool
+	if cmpErr == nil && cmp.TotalCommits <= len(cmp.Commits) {
+		inRange = map[string]bool{}
+		for _, c := range cmp.Commits {
+			inRange[c.SHA] = true
+		}
+	}
+	if since, err := g.commitsTouching(ctx, repo, base, req.ToRevision, paths, inRange); err == nil && len(since) > 0 {
+		scope := "`" + dir + "`"
+		switch {
+		case resolveErr == nil && len(outside) > 0:
+			scope += " or a file listed under *Not reverted*"
+		case resolveErr != nil && parent != "":
+			scope += " or `" + parent + "/`"
+		}
+		fmt.Fprintf(&b, "\n### Commits on %s since then touching %s\n\n", base, scope)
+		for i, c := range since {
+			if i == maxListed {
+				fmt.Fprintf(&b, "- … and %d more\n", len(since)-maxListed)
+				break
+			}
+			title, _, _ := strings.Cut(c.Commit.Message, "\n")
+			fmt.Fprintf(&b, "- `%s` %s\n", short(c.SHA), title)
+		}
+		if skipped > 0 {
+			fmt.Fprintf(&b, "\nCommits that only touched the last %d files under *Not reverted* are not listed.\n", skipped)
+		}
+	}
+
+	if len(outside) > 0 {
+		if resolveErr == nil {
+			b.WriteString("\n### Not reverted: changed since, outside the application's path, used by its kustomization\n\n")
+			fmt.Fprintf(&b, "`%s` includes these through its kustomization (`resources`, `components`, `patches` and the like) at `%s` or `%s`; check whether they caused the failure.\n\n", dir, short(req.ToRevision), short(base))
+		} else {
+			where := "`" + parent + "/`"
+			if parent == "" {
+				where = "the repository"
+			}
+			fmt.Fprintf(&b, "\n### Not reverted: changed since, in %s outside the application's path\n\n", where)
+			fmt.Fprintf(&b, "clusterdeck could not resolve the application's kustomization (%v), so this lists every changed file in %s. If the application includes any of them, check whether they caused the failure.\n\n", resolveErr, where)
+		}
+		for i, f := range outside {
+			if i == maxListed {
+				fmt.Fprintf(&b, "- … and %d more\n", len(outside)-maxListed)
+				break
+			}
+			fmt.Fprintf(&b, "- `%s`\n", f)
+		}
+	}
+	if cmpErr == nil && len(cmp.Files) >= maxCompareFiles {
+		fmt.Fprintf(&b, "\nGitHub lists at most %d changed files for a comparison, so files changed beyond that are missing here.\n", maxCompareFiles)
 	}
 	b.WriteString("\n---\n_Opened by clusterdeck._\n")
 	return b.String()
+}
+
+type commit struct {
+	SHA    string `json:"sha"`
+	Commit struct {
+		Message   string `json:"message"`
+		Committer struct {
+			Date time.Time `json:"date"`
+		} `json:"committer"`
+	} `json:"commit"`
+}
+
+func (g *GitHub) commitsTouching(ctx context.Context, repo, base, from string, paths []string, inRange map[string]bool) ([]commit, error) {
+	var start commit
+	if err := g.do(ctx, http.MethodGet, repo+"/commits/"+url.PathEscape(from), nil, &start); err != nil {
+		return nil, err
+	}
+	since := start.Commit.Committer.Date
+	seen := map[string]commit{}
+	for _, p := range paths {
+		q := url.Values{"sha": {base}, "path": {p}, "since": {since.UTC().Format(time.RFC3339)}, "per_page": {"100"}}
+		var list []commit
+		if err := g.do(ctx, http.MethodGet, repo+"/commits?"+q.Encode(), nil, &list); err != nil {
+			return nil, err
+		}
+		for _, c := range list {
+			if c.SHA == start.SHA {
+				continue
+			}
+			if inRange != nil && !inRange[c.SHA] || inRange == nil && !c.Commit.Committer.Date.After(since) {
+				continue
+			}
+			seen[c.SHA] = c
+		}
+	}
+	out := make([]commit, 0, len(seen))
+	for _, c := range seen {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i].Commit.Committer.Date, out[j].Commit.Committer.Date
+		if !a.Equal(b) {
+			return a.Before(b)
+		}
+		return out[i].SHA < out[j].SHA
+	})
+	return out, nil
 }
