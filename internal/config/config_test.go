@@ -82,3 +82,16 @@ func TestOIDCConfig(t *testing.T) {
 		t.Fatal("OIDC is on by default")
 	}
 }
+
+func TestGitHubAppNeedsIDAndKeyTogether(t *testing.T) {
+	if _, err := FromEnv(env(map[string]string{"GITHUB_APP_ID": "1"})); err == nil {
+		t.Fatal("an App id without a key must be rejected")
+	}
+	if _, err := FromEnv(env(map[string]string{"GITHUB_APP_PRIVATE_KEY": "k"})); err == nil {
+		t.Fatal("a key without an App id must be rejected")
+	}
+	c, err := FromEnv(env(map[string]string{"GITHUB_APP_ID": "1", "GITHUB_APP_PRIVATE_KEY": "k"}))
+	if err != nil || c.GitHubAppID != "1" || c.GitHubAppPrivateKey != "k" {
+		t.Fatalf("config = %+v, %v", c, err)
+	}
+}

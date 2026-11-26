@@ -170,17 +170,35 @@ Its description lists, each cut at 30 entries with "… and N more":
 |---|---|
 | One git source on github.com, with a `path`, tracking a branch | Several sources, Helm charts from a chart repository, other git hosts, a `targetRevision` that is a tag or commit |
 
-The token needs, on the repositories your Applications use, **Contents:
-read and write** and **Pull requests: read and write** (a fine-grained
-personal access token or a GitHub App token). clusterdeck only creates
-branches named `clusterdeck/rollback-*`; protect your target branch so a
-rollback still needs a review to merge.
+clusterdeck authenticates in one of two ways. Either needs, on the
+repositories your Applications use, **Contents: read and write** and **Pull
+requests: read and write**. clusterdeck only creates branches named
+`clusterdeck/rollback-*`; protect your target branch so a rollback still
+needs a review to merge.
+
+| Mode | Set | Pull requests and commits show | Notifications |
+|---|---|---|---|
+| **GitHub App** (preferred) | `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` | `<app-slug>[bot]` | native, like Renovate's |
+| Token | `GITHUB_TOKEN` (a fine-grained personal access token) | the token's owner | none: GitHub never notifies you about your own activity |
+
+With both set, the App wins. In App mode clusterdeck finds the App's
+installation on each target repository, mints a one-hour installation token
+scoped to that one repository, caches it, and re-mints it with less than 20
+minutes left. Create the App with webhooks off, install it only on the
+repositories you roll back, and give it the two permissions above.
+`GITHUB_APP_PRIVATE_KEY` is the PEM, the PEM with `\n` escapes, or base64 of
+the PEM.
 
 ```yaml
 gitops:
   github:
-    existingSecret: clusterdeck-github
-    secretKey: token
+    app:
+      existingSecret: clusterdeck-github-app
+      appIDKey: app-id
+      privateKeyKey: private-key
+    # or, with a personal access token:
+    # existingSecret: clusterdeck-github
+    # secretKey: token
 ```
 
 The pod also needs outbound HTTPS to `api.github.com` (or your
@@ -256,6 +274,7 @@ The binary reads environment variables; the chart sets them from values.
 | `ACTIONS_ENABLED` | `false`; needs `AUTH_HEADER` or OIDC login |
 | `ACTIONS_NAMESPACES` | empty: all namespaces (auto-rollback scope and the Applications a rollback pull request may target, by destination namespace; the chart also scopes RBAC to it) |
 | `AUTO_ROLLBACK_ENABLED`, `AUTO_ROLLBACK_INTERVAL` | `false`, `30s`; needs `ACTIONS_ENABLED` |
+| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` | empty; both or neither; the App wins over `GITHUB_TOKEN` |
 | `GITHUB_TOKEN`, `GITHUB_API_URL` | empty (no rollback by pull request), `https://api.github.com` |
 | `HIDE_NAMESPACES` | `kube-system,kube-public,kube-node-lease` (Apps tab only) |
 | `BACKUP_SELECTOR`, `RESTORE_CHECK_SELECTOR`, `RESTORE_TEMPLATE_SELECTOR` | `clusterdeck.io/role=...` |

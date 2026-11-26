@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -60,8 +61,18 @@ func run(logger *slog.Logger) error {
 	}
 
 	cluster.ActionNamespaces = cfg.ActionsNamespaces
-	if cfg.GitHubToken != "" {
+	switch {
+	case cfg.GitHubAppID != "":
+		key, err := gitops.ParsePrivateKey(cfg.GitHubAppPrivateKey)
+		if err != nil {
+			return fmt.Errorf("GITHUB_APP_PRIVATE_KEY: %w", err)
+		}
+		auth := &gitops.AppAuth{API: cfg.GitHubAPIURL, AppID: cfg.GitHubAppID, Key: key}
+		cluster.Git = &gitops.GitHub{API: cfg.GitHubAPIURL, Auth: auth}
+		logger.Info("GitHub auth via GitHub App", "app_id", cfg.GitHubAppID)
+	case cfg.GitHubToken != "":
 		cluster.Git = &gitops.GitHub{API: cfg.GitHubAPIURL, Token: cfg.GitHubToken}
+		logger.Info("GitHub auth via GITHUB_TOKEN")
 	}
 
 	var provider metrics.Provider = metrics.None{}

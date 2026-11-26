@@ -75,13 +75,27 @@ spec:
                   name: {{ required "metrics.signoz.existingSecret is required" .Values.metrics.signoz.existingSecret }}
                   key: {{ .Values.metrics.signoz.secretKey }}
             {{- end }}
+            {{- if or .Values.gitops.github.existingSecret .Values.gitops.github.app.existingSecret }}
+            - {name: GITHUB_API_URL, value: {{ .Values.gitops.github.apiURL | quote }}}
+            {{- end }}
             {{- with .Values.gitops.github.existingSecret }}
-            - {name: GITHUB_API_URL, value: {{ $.Values.gitops.github.apiURL | quote }}}
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ . }}
                   key: {{ $.Values.gitops.github.secretKey }}
+            {{- end }}
+            {{- with .Values.gitops.github.app.existingSecret }}
+            - name: GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.gitops.github.app.appIDKey }}
+            - name: GITHUB_APP_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.gitops.github.app.privateKeyKey }}
             {{- end }}
             {{- if eq .Values.metrics.provider "prometheus" }}
             - {name: PROMETHEUS_URL, value: {{ required "metrics.prometheus.url is required" .Values.metrics.prometheus.url | quote }}}

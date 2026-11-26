@@ -29,6 +29,8 @@ type Config struct {
 	PrometheusURL           string
 	GitHubToken             string
 	GitHubAPIURL            string
+	GitHubAppID             string
+	GitHubAppPrivateKey     string
 	OIDCIssuerURL           string
 	OIDCClientID            string
 	OIDCClientSecret        string
@@ -66,6 +68,8 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 		PrometheusURL:           get("PROMETHEUS_URL", ""),
 		GitHubToken:             get("GITHUB_TOKEN", ""),
 		GitHubAPIURL:            get("GITHUB_API_URL", "https://api.github.com"),
+		GitHubAppID:             get("GITHUB_APP_ID", ""),
+		GitHubAppPrivateKey:     get("GITHUB_APP_PRIVATE_KEY", ""),
 		OIDCIssuerURL:           get("OIDC_ISSUER_URL", ""),
 		OIDCClientID:            get("OIDC_CLIENT_ID", ""),
 		OIDCClientSecret:        get("OIDC_CLIENT_SECRET", ""),
@@ -89,6 +93,9 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 	}
 	if c.SessionTTL, err = time.ParseDuration(get("SESSION_TTL", "12h")); err != nil || c.SessionTTL < 5*time.Minute {
 		return nil, fmt.Errorf("SESSION_TTL must be a duration of at least 5m")
+	}
+	if (c.GitHubAppID == "") != (c.GitHubAppPrivateKey == "") {
+		return nil, fmt.Errorf("GitHub App auth needs both GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY")
 	}
 	oidcSet := c.OIDCIssuerURL != "" || c.OIDCClientID != "" || c.OIDCClientSecret != "" || c.OIDCRedirectURL != ""
 	if oidcSet && (c.OIDCIssuerURL == "" || c.OIDCClientID == "" || c.OIDCClientSecret == "" || c.OIDCRedirectURL == "") {
