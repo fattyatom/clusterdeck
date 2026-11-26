@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fmtBytes, fmtCores, fmtValue, fmtAgo, pct, tone, bounds, linePath, parseRoute, appHref, shortRev, autoRollbackText, linkify, envOf, appGroup, groupApps } from "./format.js";
+import { fmtBytes, fmtCores, fmtValue, fmtAgo, pct, tone, bounds, linePath, parseRoute, appHref, shortRev, autoRollbackText, linkify, envOf, appGroup, groupApps, matchesApp } from "./format.js";
 
 test("fmtBytes picks a binary unit", () => {
   assert.equal(fmtBytes(512), "512 B");
@@ -109,4 +109,13 @@ test("groupApps puts every environment of an app together, base first", () => {
   assert.deepEqual(g[0].apps.map((a) => a.namespace), ["nextexplorer", "nextexplorer-testing"]);
   assert.equal(groupApps(apps, "namespace").length, 4);
   assert.equal(groupApps(apps, "none")[0].apps.length, 4);
+});
+
+test("matchesApp needs every word to appear somewhere on the card", () => {
+  const a = { name: "sure", namespace: "sure-testing", argo: [{ application: "sure-testing" }], workloads: [{ name: "worker" }] };
+  assert.equal(matchesApp(a, ""), true);
+  assert.equal(matchesApp(a, "SURE"), true);
+  assert.equal(matchesApp(a, "sure worker"), true);
+  assert.equal(matchesApp(a, "sure redis"), false);
+  assert.equal(matchesApp(a, "nextexplorer"), false);
 });
