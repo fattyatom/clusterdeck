@@ -174,3 +174,14 @@ export function groupApps(apps, by) {
       }),
     }));
 }
+
+// matchesApp says whether an app card matches a filter: every word must appear in its
+// name, namespace, group, Argo CD applications or workload names (case-insensitive).
+export function matchesApp(app, query) {
+  const words = String(query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [app.name, app.namespace, appGroup(app), ...(app.argo ?? []).map((s) => s.application), ...(app.workloads ?? []).map((w) => w.name)]
+    .join(" ")
+    .toLowerCase();
+  return words.every((w) => hay.includes(w));
+}

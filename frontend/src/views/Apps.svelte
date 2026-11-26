@@ -1,6 +1,6 @@
 <script>
   import { api, post } from "../lib/api.js";
-  import { appHref, envOf, groupApps } from "../lib/format.js";
+  import { appHref, envOf, groupApps, matchesApp } from "../lib/format.js";
   import { act, show } from "../lib/notify.svelte.js";
   import Badge from "../components/Badge.svelte";
 
@@ -9,7 +9,9 @@
   let error = $state("");
   const GROUPINGS = [["app", "App"], ["namespace", "Namespace"], ["none", "None"]];
   let groupBy = $state(load());
-  let groups = $derived(apps ? groupApps(apps, groupBy) : []);
+  let query = $state("");
+  let shown = $derived(apps ? apps.filter((a) => matchesApp(a, query)) : []);
+  let groups = $derived(groupApps(shown, groupBy));
 
   function load() {
     try {
@@ -45,13 +47,17 @@
 {:else if !apps}<p class="muted">Loading…</p>
 {:else if !apps.length}<p class="muted">No workloads found.</p>
 {:else}
-  <h2 class="with-controls">Apps ({apps.length})
+  <h2 class="with-controls">Apps ({query.trim() ? `${shown.length} of ${apps.length}` : apps.length})
     <span class="segmented small">
       {#each GROUPINGS as [k, label]}
         <button class:on={groupBy === k} onclick={() => setGroup(k)}>{label}</button>
       {/each}
     </span>
   </h2>
+  <div class="filter">
+    <input type="search" placeholder="Filter apps…" title="Matches app, namespace, Argo CD app or workload names" aria-label="Filter apps" bind:value={query} />
+  </div>
+  {#if !shown.length}<p class="muted">No apps match “{query}”.</p>{/if}
   {#each groups as g (g.key)}
     <section class="app-group">
       {#if g.key}
@@ -75,7 +81,7 @@
                 <div class="small muted mono clamp2" title={w.images.join("\n")}>{w.images.join(", ")}</div>
                 <ul class="pods">
                   {#each w.pods as p (p.name)}
-                    <li>
+                    <li class:multi={p.containers.length > 1}>
                       <span class="mono clamp2" class:warn={!p.ready} title={p.name}>{p.name}</span>
                       <span class="actions">
                         {#if p.restarts}<span class="warn">↻{p.restarts}</span>{/if}

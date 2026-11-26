@@ -124,8 +124,14 @@ tr.current td { background: color-mix(in srgb, var(--good) 8%, transparent); }
 td.rev { white-space: nowrap; }
 td.rev .badge { margin-left: 6px; }
 .clamp2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; min-width: 0; }
-.row > .clamp2, .pods li > .clamp2 { flex: 1 1 auto; }
-.row > span:last-child, .pods .actions { flex: none; }
+.row > .clamp2 { flex: 1 1 auto; }
+.row > span:last-child { flex: none; }
+.pods li { flex-wrap: wrap; align-items: flex-start; }
+.pods li > .clamp2 { flex: 1 1 140px; }
+.pods .actions { flex: 0 1 auto; margin-left: auto; justify-content: flex-end; align-items: center; min-width: 0; }
+.filter { display: flex; gap: 8px; align-items: center; margin: 0 0 14px; }
+.filter input { max-width: 360px; }
+.pods li.multi .actions { flex-basis: 100%; margin-left: 0; justify-content: flex-start; }
 .card h3 > a { min-width: 0; }
 .tags { display: inline-flex; gap: 6px; align-items: center; flex: none; }
 .tag { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
