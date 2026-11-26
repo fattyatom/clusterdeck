@@ -36,7 +36,16 @@ type EventInfo struct {
 	Time      time.Time `json:"time"`
 }
 
+type PodBrief struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Phase     string `json:"phase"`
+	Node      string `json:"node"`
+	Restarts  int32  `json:"restarts"`
+}
+
 type Overview struct {
+	Pods       []PodBrief     `json:"pods"`
 	Nodes      []NodeInfo     `json:"nodes"`
 	Namespaces int            `json:"namespaces"`
 	PodPhases  map[string]int `json:"podPhases"`
@@ -64,6 +73,11 @@ func (c *Client) Overview(ctx context.Context) (*Overview, error) {
 	podsPerNode := map[string]int{}
 	for _, p := range pods.Items {
 		ov.PodPhases[string(p.Status.Phase)]++
+		var restarts int32
+		for _, cs := range p.Status.ContainerStatuses {
+			restarts += cs.RestartCount
+		}
+		ov.Pods = append(ov.Pods, PodBrief{Namespace: p.Namespace, Name: p.Name, Phase: string(p.Status.Phase), Node: p.Spec.NodeName, Restarts: restarts})
 		if p.Status.Phase == corev1.PodRunning || p.Status.Phase == corev1.PodPending {
 			podsPerNode[p.Spec.NodeName]++
 		}

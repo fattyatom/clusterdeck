@@ -1,7 +1,7 @@
 <script>
   import { api } from "./lib/api.js";
   import { parseRoute, linkify } from "./lib/format.js";
-  import { notice } from "./lib/notify.svelte.js";
+  import { notice, confirmDialog, settle } from "./lib/notify.svelte.js";
   import Modal from "./components/Modal.svelte";
   import Overview from "./views/Overview.svelte";
   import Apps from "./views/Apps.svelte";
@@ -32,6 +32,7 @@
 <svelte:window
   onhashchange={() => {
     notice.open = false;
+    settle(false);
     route = parseRoute(location.hash);
   }}
 />
@@ -62,4 +63,9 @@
 <Modal bind:open={notice.open} title={notice.title}>
   <pre>{#each linkify(notice.text) as part}{#if part.href}<a href={part.href} target="_blank" rel="noopener noreferrer">{part.text}</a>{:else}{part.text}{/if}{/each}</pre>
   <div class="actions"><button onclick={() => (notice.open = false)}>Close</button></div>
+</Modal>
+
+<Modal bind:open={confirmDialog.open} title={confirmDialog.title} onclose={() => settle(false)}>
+  <p>{confirmDialog.text}</p>
+  <div class="actions"><button class="danger" onclick={() => settle(true)}>{confirmDialog.label}</button><button onclick={() => settle(false)}>Cancel</button></div>
 </Modal>

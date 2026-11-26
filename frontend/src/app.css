@@ -139,3 +139,9 @@ td.rev .badge { margin-left: 6px; }
 .app-group { margin-bottom: 22px; }
 .group-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); font-size: 15px; }
 .group-head .clamp2 { -webkit-line-clamp: 1; line-clamp: 1; }
+button.kpi { text-align: left; cursor: pointer; padding: 12px 14px; }
+button.kpi.on { border-color: var(--accent); }
+.pods li { display: block; }
+.pods li > .clamp2 { display: block; }
+.pods .actions, .pods li.multi .actions { margin: 4px 0 0; justify-content: flex-start; }
+a.button, td button, .pods button, .workload button { padding: 3px 10px; }

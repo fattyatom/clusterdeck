@@ -1,7 +1,7 @@
 <script>
   import { api, post } from "../lib/api.js";
   import { fmtAgo, tone } from "../lib/format.js";
-  import { act } from "../lib/notify.svelte.js";
+  import { act, ask } from "../lib/notify.svelte.js";
   import Badge from "../components/Badge.svelte";
   import DataTable from "../components/DataTable.svelte";
   import Modal from "../components/Modal.svelte";
@@ -26,8 +26,8 @@
   }
   load();
 
-  function runNow(j) {
-    if (confirm(`Run ${j.namespace}/${j.name} now?`)) act("Run now", () => post(`/api/cronjobs/${j.namespace}/${j.name}/run`)).then(load);
+  async function runNow(j) {
+    if (await ask("Run now", `Run ${j.namespace}/${j.name} now?`, "Run now")) act("Run now", () => post(`/api/cronjobs/${j.namespace}/${j.name}/run`)).then(load);
   }
 
   function openRestore(t) {

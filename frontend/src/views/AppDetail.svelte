@@ -1,7 +1,7 @@
 <script>
   import { api, post } from "../lib/api.js";
   import { fmtAgo, shortRev, autoRollbackText } from "../lib/format.js";
-  import { act } from "../lib/notify.svelte.js";
+  import { act, ask } from "../lib/notify.svelte.js";
   import Badge from "../components/Badge.svelte";
   import DataTable from "../components/DataTable.svelte";
 
@@ -27,7 +27,7 @@
 
   async function rollbackPR(r, revision) {
     const src = r.manager.source;
-    if (!confirm(`Open a pull request that restores ${src.path} in ${src.repoURL} to ${shortRev(revision)}?`)) return;
+    if (!(await ask("Open rollback PR", `Open a pull request that restores ${src.path} in ${src.repoURL} to ${shortRev(revision)}?`, "Open PR"))) return;
     busy = true;
     await act("Rollback pull request", () => post(`/api/argo/${encodeURIComponent(r.manager.namespace)}/${encodeURIComponent(r.manager.application)}/rollback-pr`, { revision }));
     busy = false;
@@ -35,7 +35,7 @@
 
   async function rollback(r, revision) {
     const target = revision ? `revision ${revision}` : "the previous revision";
-    if (!confirm(`Roll back ${r.namespace}/${r.name} from revision ${r.revision} to ${target}?`)) return;
+    if (!(await ask("Roll back", `Roll back ${r.namespace}/${r.name} from revision ${r.revision} to ${target}?`, "Roll back"))) return;
     busy = true;
     await act("Rollback", () => post(`/api/deployments/${r.namespace}/${r.name}/rollback`, { revision: revision || 0 }));
     busy = false;
