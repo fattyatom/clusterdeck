@@ -16,6 +16,7 @@ import (
 
 const (
 	AppLabel         = "app.kubernetes.io/name"
+	PartOfLabel      = "app.kubernetes.io/part-of"
 	AnnApp           = "clusterdeck.io/app"
 	AnnDescription   = "clusterdeck.io/description"
 	AnnParams        = "clusterdeck.io/params"

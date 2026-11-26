@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fmtBytes, fmtCores, fmtValue, fmtAgo, pct, tone, bounds, linePath, parseRoute, appHref, shortRev, autoRollbackText, linkify } from "./format.js";
+import { fmtBytes, fmtCores, fmtValue, fmtAgo, pct, tone, bounds, linePath, parseRoute, appHref, shortRev, autoRollbackText, linkify, envOf, appGroup, groupApps } from "./format.js";
 
 test("fmtBytes picks a binary unit", () => {
   assert.equal(fmtBytes(512), "512 B");
@@ -83,4 +83,30 @@ test("linkify splits out https links only", () => {
   ]);
   assert.deepEqual(linkify("no links, javascript:alert(1)"), [{ text: "no links, javascript:alert(1)" }]);
   assert.deepEqual(linkify(""), []);
+});
+
+test("envOf reads the namespace suffix", () => {
+  assert.equal(envOf("nextexplorer-testing"), "testing");
+  assert.equal(envOf("nextexplorer"), "");
+  assert.equal(envOf("cert-manager"), "");
+});
+
+test("appGroup prefers part-of, else the namespace without its environment", () => {
+  assert.equal(appGroup({ namespace: "nextexplorer-testing", name: "nextexplorer" }), "nextexplorer");
+  assert.equal(appGroup({ namespace: "demo", name: "podinfo", partOf: "gitops-demo" }), "gitops-demo");
+  assert.equal(appGroup({ namespace: "argocd", name: "argocd-redis" }), "argocd");
+});
+
+test("groupApps puts every environment of an app together, base first", () => {
+  const apps = [
+    { namespace: "sure-testing", name: "sure" },
+    { namespace: "nextexplorer-testing", name: "nextexplorer" },
+    { namespace: "nextexplorer", name: "nextexplorer" },
+    { namespace: "sure", name: "sure" },
+  ];
+  const g = groupApps(apps, "app");
+  assert.deepEqual(g.map((x) => x.key), ["nextexplorer", "sure"]);
+  assert.deepEqual(g[0].apps.map((a) => a.namespace), ["nextexplorer", "nextexplorer-testing"]);
+  assert.equal(groupApps(apps, "namespace").length, 4);
+  assert.equal(groupApps(apps, "none")[0].apps.length, 4);
 });
