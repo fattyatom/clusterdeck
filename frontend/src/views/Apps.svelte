@@ -52,9 +52,8 @@
       {/each}
     </span>
   </h2>
-  <div class="app-groups" class:flat={groupBy === "none"}>
   {#each groups as g (g.key)}
-    <section class="app-group" style="--n: {Math.min(g.apps.length, 4)}">
+    <section class="app-group">
       {#if g.key}
         <h3 class="group-head">
           <span class="clamp2" title={g.key}>{g.key}</span>
@@ -100,5 +99,4 @@
       </div>
     </section>
   {/each}
-  </div>
 {/if}
