@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -22,7 +23,7 @@ type Cluster interface {
 	Apps(ctx context.Context) ([]kube.App, error)
 	ScheduledJobs(ctx context.Context) ([]kube.ScheduledJob, error)
 	RestoreTemplates(ctx context.Context) ([]kube.RestoreTemplate, error)
-	PodLogs(ctx context.Context, ns, pod, container string, tail int64) (string, error)
+	PodLogs(ctx context.Context, ns, pod string, q kube.LogQuery) (*kube.Logs, error)
 	RunCronJob(ctx context.Context, ns, name, user string) (string, error)
 	RunRestore(ctx context.Context, ns, name string, params map[string]string, confirm, user string) (string, error)
 	RestartWorkload(ctx context.Context, ns, kind, name string) error
@@ -298,22 +299,49 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) error {
-	tail := int64(200)
-	if q := r.URL.Query().Get("tail"); q != "" {
-		n, err := strconv.ParseInt(q, 10, 64)
-		if err != nil || n < 1 || n > 5000 {
-			return errors.Join(kube.ErrInvalid, errors.New("tail must be 1-5000"))
-		}
-		tail = n
+	q, err := logQuery(r)
+	if err != nil {
+		return errors.Join(kube.ErrInvalid, err)
 	}
-	logs, err := s.cluster.PodLogs(r.Context(), r.PathValue("ns"), r.PathValue("pod"), r.URL.Query().Get("container"), tail)
+	logs, err := s.cluster.PodLogs(r.Context(), r.PathValue("ns"), r.PathValue("pod"), q)
 	if err != nil {
 		return err
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_, err = w.Write([]byte(logs))
-	return err
+	writeJSON(w, http.StatusOK, logs)
+	return nil
+}
+
+func logQuery(r *http.Request) (kube.LogQuery, error) {
+	v := r.URL.Query()
+	q := kube.LogQuery{Container: v.Get("container"), Tail: 500, Contains: strings.TrimSpace(v.Get("q")), Previous: v.Get("previous") == "true"}
+	if t := v.Get("tail"); t != "" {
+		n, err := strconv.ParseInt(t, 10, 64)
+		if err != nil || n < 1 || n > 5000 {
+			return q, errors.New("tail must be 1-5000")
+		}
+		q.Tail = n
+	}
+	for name, dst := range map[string]*time.Time{"since": &q.Since, "until": &q.Until} {
+		if t := v.Get(name); t != "" {
+			parsed, err := time.Parse(time.RFC3339, t)
+			if err != nil {
+				return q, fmt.Errorf("%s must be an RFC 3339 time", name)
+			}
+			*dst = parsed
+		}
+	}
+	for _, l := range strings.Split(v.Get("level"), ",") {
+		if l = strings.TrimSpace(strings.ToLower(l)); l != "" {
+			if !kube.ValidLevel(l) {
+				return q, fmt.Errorf("level must be one of %s or unknown", strings.Join(kube.Levels, ", "))
+			}
+			q.Levels = append(q.Levels, l)
+		}
+	}
+	if len(q.Contains) > 200 {
+		return q, errors.New("q must be at most 200 characters")
+	}
+	return q, nil
 }
 
 func (s *Server) handleRollouts(w http.ResponseWriter, r *http.Request) error {

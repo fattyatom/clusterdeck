@@ -27,6 +27,7 @@ type fakeCluster struct {
 	restarted  string
 	rolledBack string
 	rollbackPR string
+	logQuery   kube.LogQuery
 }
 
 func (f *fakeCluster) Overview(context.Context) (*kube.Overview, error) {
@@ -39,8 +40,9 @@ func (f *fakeCluster) ScheduledJobs(context.Context) ([]kube.ScheduledJob, error
 func (f *fakeCluster) RestoreTemplates(context.Context) ([]kube.RestoreTemplate, error) {
 	return []kube.RestoreTemplate{}, nil
 }
-func (f *fakeCluster) PodLogs(_ context.Context, ns, pod, container string, tail int64) (string, error) {
-	return ns + "/" + pod + "/" + container + "/" + string(rune('0'+tail%10)), nil
+func (f *fakeCluster) PodLogs(_ context.Context, ns, pod string, q kube.LogQuery) (*kube.Logs, error) {
+	f.logQuery = q
+	return &kube.Logs{Lines: []kube.LogLine{{Level: "info", Text: ns + "/" + pod + "/" + q.Container}}}, nil
 }
 func (f *fakeCluster) RunCronJob(_ context.Context, ns, name, user string) (string, error) {
 	f.ranCronJob = ns + "/" + name + " by " + user
@@ -209,13 +211,31 @@ func TestMetricsNotConfigured(t *testing.T) {
 }
 
 func TestLogsEndpoint(t *testing.T) {
-	s, _, _, _ := newServer(Options{})
-	rec := do(s, "GET", "/api/pods/shop/web-1/logs?container=c&tail=7", "", nil)
-	if rec.Code != http.StatusOK || rec.Body.String() != "shop/web-1/c/7" || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") {
+	s, fc, _, _ := newServer(Options{})
+	rec := do(s, "GET", "/api/pods/shop/web-1/logs?container=c&tail=7&since=2026-11-26T10:00:00Z&until=2026-11-26T11:00:00%2B01:00&level=Warn,%20error&q=%20timeout%20&previous=true", "", nil)
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
 		t.Fatalf("logs: %d %q", rec.Code, rec.Body)
 	}
-	if rec := do(s, "GET", "/api/pods/shop/web-1/logs?tail=999999", "", nil); rec.Code != http.StatusBadRequest {
-		t.Fatalf("tail bound: %d", rec.Code)
+	var body kube.Logs
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || len(body.Lines) != 1 || body.Lines[0].Text != "shop/web-1/c" {
+		t.Fatalf("body: %v %q", err, rec.Body)
+	}
+	q := fc.logQuery
+	since := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+	if q.Container != "c" || q.Tail != 7 || !q.Since.Equal(since) || !q.Until.Equal(since) || q.Contains != "timeout" || !q.Previous ||
+		strings.Join(q.Levels, ",") != "warn,error" {
+		t.Fatalf("query: %+v", q)
+	}
+
+	do(s, "GET", "/api/pods/shop/web-1/logs", "", nil)
+	if q := fc.logQuery; q.Tail != 500 || !q.Since.IsZero() || q.Levels != nil || q.Previous {
+		t.Fatalf("defaults: %+v", q)
+	}
+
+	for _, bad := range []string{"tail=999999", "tail=0", "since=yesterday", "until=2026-11-26", "level=loud", "q=" + strings.Repeat("x", 201)} {
+		if rec := do(s, "GET", "/api/pods/shop/web-1/logs?"+bad, "", nil); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: %d", bad, rec.Code)
+		}
 	}
 }
 

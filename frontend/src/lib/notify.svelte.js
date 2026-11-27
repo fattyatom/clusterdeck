@@ -1,18 +1,19 @@
-export const notice = $state({ open: false, title: "", text: "" });
+export const notice = $state({ open: false, title: "", text: "", tone: "" });
 
-export function show(title, text) {
+export function show(title, text, tone = "") {
   notice.title = title;
   notice.text = text || "(empty)";
+  notice.tone = tone;
   notice.open = true;
 }
 
 export async function act(label, fn) {
   try {
     const out = await fn();
-    show(label, out.result);
+    show(label, out.result, "good");
     return true;
   } catch (e) {
-    show(`${label} failed`, e.message);
+    show(`${label} failed`, e.message, "bad");
     return false;
   }
 }

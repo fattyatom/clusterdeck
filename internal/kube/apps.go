@@ -197,15 +197,6 @@ func (c *Client) argoByNamespace(ctx context.Context) map[string][]ArgoStatus {
 	return out
 }
 
-func (c *Client) PodLogs(ctx context.Context, ns, pod, container string, tail int64) (string, error) {
-	opts := &corev1.PodLogOptions{Container: container, TailLines: &tail, LimitBytes: ptr(int64(512 * 1024))}
-	raw, err := c.Core.CoreV1().Pods(ns).GetLogs(pod, opts).DoRaw(ctx)
-	if err != nil {
-		return "", fmt.Errorf("logs %s/%s: %w", ns, pod, err)
-	}
-	return string(raw), nil
-}
-
 func (c *Client) RestartWorkload(ctx context.Context, ns, kind, name string) error {
 	patch := []byte(fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":%q}}}}}`, c.Now().UTC().Format(time.RFC3339)))
 	var err error

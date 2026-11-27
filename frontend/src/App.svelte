@@ -60,12 +60,12 @@
   {/if}
 </main>
 
-<Modal bind:open={notice.open} title={notice.title}>
-  <pre>{#each linkify(notice.text) as part}{#if part.href}<a href={part.href} target="_blank" rel="noopener noreferrer">{part.text}</a>{:else}{part.text}{/if}{/each}</pre>
-  <div class="actions"><button onclick={() => (notice.open = false)}>Close</button></div>
+<Modal bind:open={notice.open} title={notice.title} tone={notice.tone}>
+  <pre class="output">{#each linkify(notice.text) as part}{#if part.href}<a href={part.href} target="_blank" rel="noopener noreferrer">{part.text}</a>{:else}{part.text}{/if}{/each}</pre>
+  {#snippet footer()}<button class="primary" onclick={() => (notice.open = false)}>Close</button>{/snippet}
 </Modal>
 
-<Modal bind:open={confirmDialog.open} title={confirmDialog.title} onclose={() => settle(false)}>
-  <p>{confirmDialog.text}</p>
-  <div class="actions"><button class="danger" onclick={() => settle(true)}>{confirmDialog.label}</button><button onclick={() => settle(false)}>Cancel</button></div>
+<Modal bind:open={confirmDialog.open} title={confirmDialog.title} size="sm" tone="bad" onclose={() => settle(false)}>
+  <p class="confirm-text">{confirmDialog.text}</p>
+  {#snippet footer()}<button onclick={() => settle(false)}>Cancel</button><button class="danger solid" onclick={() => settle(true)}>{confirmDialog.label}</button>{/snippet}
 </Modal>

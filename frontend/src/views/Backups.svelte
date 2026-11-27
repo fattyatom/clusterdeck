@@ -90,19 +90,26 @@
   {/if}
 {/if}
 
-<Modal bind:open={restoreOpen} title="Restore {target}">
+<Modal bind:open={restoreOpen} title="Restore" subtitle={target} tone="bad">
   {#if current}
-    <p class="warn">A restore usually overwrites live data. Read the template's description before running it.</p>
-    {#if current.description}<p class="muted">{current.description}</p>{/if}
-    {#each current.params as p (p.name)}
-      <label for="param-{p.name}">{p.name}</label>
-      <input id="param-{p.name}" name={p.name} autocomplete="off" placeholder={p.default || "(template default)"} bind:value={values[p.name]} />
-    {/each}
-    <label for="restore-confirm">Type {target} to confirm</label>
-    <input id="restore-confirm" autocomplete="off" placeholder={target} bind:value={confirmText} />
-    <div class="actions spaced">
-      <button class="danger" disabled={confirmText !== target} onclick={runRestore}>Run restore</button>
-      <button onclick={() => (restoreOpen = false)}>Cancel</button>
-    </div>
+    <form id="restore-form" onsubmit={(e) => { e.preventDefault(); if (confirmText === target) runRestore(); }}>
+      <div class="callout bad">A restore usually overwrites live data. Read the template's description before running it.</div>
+      {#if current.description}<p class="muted">{current.description}</p>{/if}
+      {#if current.params.length}
+        <fieldset class="fields">
+          <legend>Parameters</legend>
+          {#each current.params as p (p.name)}
+            <label for="param-{p.name}">{p.name}</label>
+            <input id="param-{p.name}" name={p.name} autocomplete="off" placeholder={p.default || "(template default)"} bind:value={values[p.name]} />
+          {/each}
+        </fieldset>
+      {/if}
+      <label for="restore-confirm">Type <strong class="mono">{target}</strong> to confirm</label>
+      <input id="restore-confirm" autocomplete="off" placeholder={target} bind:value={confirmText} />
+    </form>
   {/if}
+  {#snippet footer()}
+    <button type="button" onclick={() => (restoreOpen = false)}>Cancel</button>
+    <button type="submit" form="restore-form" class="danger solid" disabled={confirmText !== target}>Run restore</button>
+  {/snippet}
 </Modal>

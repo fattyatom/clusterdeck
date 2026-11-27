@@ -13,7 +13,7 @@ undo it. Where it would, the rollback is a pull request.
 | Tab | What it shows | Where the data comes from |
 |---|---|---|
 | Overview | Node readiness, CPU and memory now, pod phases, recent warning events | Kubernetes API, metrics-server |
-| Apps | Workloads grouped by `app.kubernetes.io/name`, ready replicas, restarts, pods, logs, Argo CD sync and health | Kubernetes API, Argo CD `Application`s (optional) |
+| Apps | Workloads grouped by `app.kubernetes.io/name`, ready replicas, restarts, pods, logs filtered by time range, severity and text, Argo CD sync and health | Kubernetes API, Argo CD `Application`s (optional) |
 | App → Rollouts | Per Deployment: a Synced → Rolled out → Available → Healthy pipeline, the last 10 revisions with their images, Argo CD sync history, **Roll back** to any revision, and opt-in **auto-rollback** | Deployments, ReplicaSets, pods, Argo CD `Application`s |
 | Backups | Every backup and restore-check CronJob: health, last success, next run, last 5 runs, **Run now** | CronJobs and Jobs you label |
 | Restore | Restore templates with typed parameters and a typed confirmation | ConfigMaps you label |
@@ -106,6 +106,17 @@ undeclared parameters, and only accepts parameter values made of
 
 Keeping the Job inside a ConfigMap means your GitOps tool syncs the template,
 never the destructive Job itself.
+
+## Logs
+
+The log viewer asks the server for `GET /api/pods/{ns}/{pod}/logs` with
+`container`, `tail` (1-5000, default 500), `since` and `until` (RFC 3339),
+`level` (any of `debug,info,warn,error,unknown`), `q` (a case-insensitive
+substring) and `previous=true`. `since` goes to the Kubernetes API; the rest is
+applied by clusterdeck on up to the last 20,000 lines (8 MiB), so the browser
+only receives what matches. The severity comes from JSON fields (`level`,
+`severity`, ...), logfmt `level=`, klog prefixes or a leading `INFO`/`WARN`/...
+word; indented lines such as stack frames take the level of the line above.
 
 ## Rollouts and rollback
 

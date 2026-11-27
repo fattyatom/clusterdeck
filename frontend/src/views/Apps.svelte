@@ -1,8 +1,9 @@
 <script>
   import { api, post } from "../lib/api.js";
   import { appHref, envOf, groupApps, matchesApp } from "../lib/format.js";
-  import { act, ask, show } from "../lib/notify.svelte.js";
+  import { act, ask } from "../lib/notify.svelte.js";
   import Badge from "../components/Badge.svelte";
+  import LogViewer from "../components/LogViewer.svelte";
 
   let { config } = $props();
   let apps = $state(null);
@@ -30,12 +31,14 @@
 
   api("/api/apps").then((d) => (apps = d)).catch((e) => (error = e.message));
 
-  async function logs(ns, pod, container) {
-    try {
-      show(`${ns}/${pod} · ${container}`, await api(`/api/pods/${ns}/${pod}/logs?tail=300&container=${encodeURIComponent(container)}`));
-    } catch (e) {
-      show("Logs failed", e.message);
-    }
+  let logsOpen = $state(false);
+  let logTarget = $state({ namespace: "", pod: "", containers: [] });
+  let logContainer = $state("");
+
+  function logs(ns, p, container) {
+    logTarget = { namespace: ns, pod: p.name, containers: p.containers };
+    logContainer = container;
+    logsOpen = true;
   }
 
   async function restart(ns, w) {
@@ -86,7 +89,7 @@
                       <span class="actions">
                         {#if p.restarts}<span class="warn">↻{p.restarts}</span>{/if}
                         {#each p.containers as c}
-                          <button onclick={() => logs(a.namespace, p.name, c)}>{p.containers.length > 1 ? `Logs: ${c}` : "Logs"}</button>
+                          <button onclick={() => logs(a.namespace, p, c)}>{p.containers.length > 1 ? `Logs: ${c}` : "Logs"}</button>
                         {/each}
                       </span>
                     </li>
@@ -106,3 +109,5 @@
     </section>
   {/each}
 {/if}
+
+<LogViewer bind:open={logsOpen} namespace={logTarget.namespace} pod={logTarget.pod} containers={logTarget.containers} bind:container={logContainer} />
