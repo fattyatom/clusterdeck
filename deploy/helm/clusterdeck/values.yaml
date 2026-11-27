@@ -37,6 +37,10 @@ gitops:
     existingSecret: ""
     secretKey: token
     apiURL: https://api.github.com
+    app:
+      existingSecret: ""
+      appIDKey: app-id
+      privateKeyKey: private-key
 
 metrics:
   provider: none

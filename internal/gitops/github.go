@@ -59,7 +59,21 @@ type PullRequest struct {
 type GitHub struct {
 	API    string
 	Token  string
+	Auth   TokenSource
 	Client *http.Client
+}
+
+var repoPath = regexp.MustCompile(`^/repos/([^/]+)/([^/?]+)`)
+
+func (g *GitHub) token(ctx context.Context, p string) (string, error) {
+	if g.Auth == nil {
+		return g.Token, nil
+	}
+	m := repoPath.FindStringSubmatch(p)
+	if m == nil {
+		return "", fmt.Errorf("github: %q is not a repository path", p)
+	}
+	return g.Auth.Token(ctx, m[1], m[2])
 }
 
 func ParseRepo(repoURL string) (owner, repo string, ok bool) {
@@ -131,13 +145,17 @@ func (g *GitHub) do(ctx context.Context, method, p string, body, out any) error 
 	if api == "" {
 		api = "https://api.github.com"
 	}
+	token, err := g.token(ctx, p)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, method, api+p, r)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("Authorization", "Bearer "+g.Token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
