@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -248,7 +249,7 @@ func main() {
 		log.Fatal(err)
 	}
 	cluster.Git = &demoGit{}
-	h := server.New(cluster, wave{}, server.Options{
+	h := server.New(demoLogs{cluster}, wave{}, server.Options{
 		ClusterName: "demo-cluster", AuthHeader: "X-Forwarded-Email", ActionsEnabled: true, AutoRollback: true, GitRollback: true,
 		Static: web.FS(), Logger: slog.New(slog.NewTextHandler(os.Stderr, nil)),
 	})
@@ -261,4 +262,30 @@ func main() {
 		r.Header.Set("X-Forwarded-Email", "demo@example.com")
 		h.ServeHTTP(w, r)
 	})))
+}
+
+type demoLogs struct{ *kube.Client }
+
+var demoMessages = []string{
+	`level=info msg="GET /api/items 200" duration=12ms`,
+	`level=debug msg="cache hit" key=items:42`,
+	`level=info msg="GET /healthz 200" duration=1ms`,
+	`level=warn msg="slow query" duration=1.8s table=orders`,
+	`level=error msg="upstream timeout" upstream=payments err="context deadline exceeded"`,
+	`    at payments.Client.Charge (client.go:88)`,
+	`{"level":"info","msg":"job finished","jobs":3}`,
+	`GET /metrics 200`,
+}
+
+func (d demoLogs) PodLogs(_ context.Context, _, _ string, q kube.LogQuery) (*kube.Logs, error) {
+	end := time.Now().UTC()
+	var b strings.Builder
+	for i := 2000; i >= 0; i-- {
+		at := end.Add(-time.Duration(i) * 7 * time.Second)
+		if !q.Since.IsZero() && at.Before(q.Since) {
+			continue
+		}
+		fmt.Fprintf(&b, "%s %s\n", at.Format(time.RFC3339Nano), demoMessages[(i*7+i/3)%len(demoMessages)])
+	}
+	return kube.FilterLogs([]byte(b.String()), q), nil
 }
