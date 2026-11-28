@@ -97,6 +97,12 @@ spec:
                   name: {{ . }}
                   key: {{ $.Values.gitops.github.app.privateKeyKey }}
             {{- end }}
+            {{- with .Values.inflight.repo }}
+            - {name: INFLIGHT_REPO, value: {{ . | quote }}}
+            - {name: INFLIGHT_BRANCH, value: {{ $.Values.inflight.branch | quote }}}
+            - {name: SOAK_SECONDS, value: {{ $.Values.inflight.soakSeconds | quote }}}
+            - {name: WATCH_SECONDS, value: {{ $.Values.inflight.watchSeconds | quote }}}
+            {{- end }}
             {{- if eq .Values.metrics.provider "prometheus" }}
             - {name: PROMETHEUS_URL, value: {{ required "metrics.prometheus.url is required" .Values.metrics.prometheus.url | quote }}}
             {{- end }}

@@ -8,6 +8,7 @@
   import AppDetail from "./views/AppDetail.svelte";
   import Backups from "./views/Backups.svelte";
   import Load from "./views/Load.svelte";
+  import InFlight from "./views/InFlight.svelte";
 
   let config = $state(null);
   let error = $state("");
@@ -23,6 +24,7 @@
   const tabs = [
     ["overview", "Overview"],
     ["apps", "Apps"],
+    ["inflight", "In flight"],
     ["backups", "Backups"],
     ["load", "Load"],
   ];
@@ -56,6 +58,7 @@
     {:else if route.view === "app"}{#key `${route.namespace}/${route.app}`}<AppDetail {config} namespace={route.namespace} app={route.app} />{/key}
     {:else if route.view === "backups"}<Backups {config} />
     {:else if route.view === "load"}<Load {config} />
+    {:else if route.view === "inflight"}<InFlight />
     {/if}
   {/if}
 </main>

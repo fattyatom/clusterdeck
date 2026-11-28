@@ -214,3 +214,47 @@ func (c *Client) RestartWorkload(ctx context.Context, ns, kind, name string) err
 }
 
 func ptr[T any](v T) *T { return &v }
+
+type ArgoApplication struct {
+	Name           string     `json:"name"`
+	Namespace      string     `json:"namespace"`
+	Destination    string     `json:"destination"`
+	Sync           string     `json:"sync"`
+	Health         string     `json:"health"`
+	Revision       string     `json:"revision"`
+	OperationPhase string     `json:"operationPhase,omitempty"`
+	Changed        *time.Time `json:"changed,omitempty"`
+}
+
+func (c *Client) ArgoApplications(ctx context.Context) ([]ArgoApplication, error) {
+	if c.Dynamic == nil {
+		return nil, nil
+	}
+	list, err := c.Dynamic.Resource(argoAppGVR).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ArgoApplication, 0, len(list.Items))
+	for _, item := range list.Items {
+		a := ArgoApplication{Name: item.GetName(), Namespace: item.GetNamespace()}
+		a.Destination, _, _ = unstructured.NestedString(item.Object, "spec", "destination", "namespace")
+		a.Sync, _, _ = unstructured.NestedString(item.Object, "status", "sync", "status")
+		a.Health, _, _ = unstructured.NestedString(item.Object, "status", "health", "status")
+		a.Revision, _, _ = unstructured.NestedString(item.Object, "status", "sync", "revision")
+		a.OperationPhase, _, _ = unstructured.NestedString(item.Object, "status", "operationState", "phase")
+		for _, f := range [][]string{
+			{"status", "operationState", "finishedAt"},
+			{"status", "operationState", "startedAt"},
+			{"status", "reconciledAt"},
+		} {
+			if s, _, _ := unstructured.NestedString(item.Object, f...); s != "" {
+				if t, err := time.Parse(time.RFC3339, s); err == nil {
+					a.Changed = &t
+					break
+				}
+			}
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}

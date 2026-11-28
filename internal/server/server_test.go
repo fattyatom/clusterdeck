@@ -14,6 +14,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/fattyatom/clusterdeck/internal/inflight"
 	"github.com/fattyatom/clusterdeck/internal/kube"
 	"github.com/fattyatom/clusterdeck/internal/metrics"
 )
@@ -339,5 +340,42 @@ func TestNoLogoutWithoutLogin(t *testing.T) {
 	}
 	if rec := do(s, "GET", "/auth/login", "", authed); rec.Code == http.StatusOK && rec.Body.String() == "login page" {
 		t.Fatal("login routes exist without login")
+	}
+}
+
+type fakeInFlight struct{ calls int }
+
+func (f *fakeInFlight) Report(context.Context) (*inflight.Report, error) {
+	f.calls++
+	return &inflight.Report{Rows: []inflight.Row{{App: "sure", Env: "production", Kind: inflight.KindPromotion, PR: 7, WaitingOn: inflight.WaitHealth}}, Notices: []string{inflight.MissingStatuses}}, nil
+}
+
+func TestInFlightEndpoint(t *testing.T) {
+	fi := &fakeInFlight{}
+	s, _, _, _ := newServer(Options{InFlight: fi})
+	rec := do(s, "GET", "/api/inflight", "", nil)
+	if rec.Code != http.StatusOK || fi.calls != 1 {
+		t.Fatalf("inflight: %d %s", rec.Code, rec.Body)
+	}
+	var rep inflight.Report
+	if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil || len(rep.Rows) != 1 || rep.Rows[0].PR != 7 || rep.Notices[0] != inflight.MissingStatuses {
+		t.Fatalf("body = %s (%v)", rec.Body, err)
+	}
+	if rec := do(s, "GET", "/api/config", "", nil); !strings.Contains(rec.Body.String(), `"inflight":true`) {
+		t.Fatalf("config = %s", rec.Body)
+	}
+}
+
+func TestInFlightNotConfigured(t *testing.T) {
+	s, _, _, _ := newServer(Options{})
+	if rec := do(s, "GET", "/api/inflight", "", nil); rec.Code != http.StatusNotImplemented {
+		t.Fatalf("got %d", rec.Code)
+	}
+}
+
+func TestInFlightNeedsLogin(t *testing.T) {
+	s, _, _, _ := newServer(Options{InFlight: &fakeInFlight{}, AuthHeader: "X-User"})
+	if rec := do(s, "GET", "/api/inflight", "", nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous got %d", rec.Code)
 	}
 }

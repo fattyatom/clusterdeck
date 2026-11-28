@@ -26,6 +26,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/fattyatom/clusterdeck/internal/gitops"
+	"github.com/fattyatom/clusterdeck/internal/inflight"
 	"github.com/fattyatom/clusterdeck/internal/kube"
 	"github.com/fattyatom/clusterdeck/internal/metrics"
 	"github.com/fattyatom/clusterdeck/internal/server"
@@ -251,7 +252,7 @@ func main() {
 	cluster.Git = &demoGit{}
 	h := server.New(demoLogs{cluster}, wave{}, server.Options{
 		ClusterName: "demo-cluster", AuthHeader: "X-Forwarded-Email", ActionsEnabled: true, AutoRollback: true, GitRollback: true,
-		Static: web.FS(), Logger: slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		Static: web.FS(), Logger: slog.New(slog.NewTextHandler(os.Stderr, nil)), InFlight: demoInFlight{},
 	})
 	addr := ":8099"
 	if v := os.Getenv("LISTEN_ADDR"); v != "" {
@@ -288,4 +289,22 @@ func (d demoLogs) PodLogs(_ context.Context, _, _ string, q kube.LogQuery) (*kub
 		fmt.Fprintf(&b, "%s %s\n", at.Format(time.RFC3339Nano), demoMessages[(i*7+i/3)%len(demoMessages)])
 	}
 	return kube.FilterLogs([]byte(b.String()), q), nil
+}
+
+type demoInFlight struct{}
+
+func (demoInFlight) Report(context.Context) (*inflight.Report, error) {
+	now := time.Now()
+	ago := func(d time.Duration) *time.Time { t := now.Add(-d); return &t }
+	secs := func(d time.Duration) *int64 { v := int64(d / time.Second); return &v }
+	return &inflight.Report{
+		GeneratedAt: now, SoakSeconds: 3600, WatchSeconds: 3600,
+		Notices: []string{inflight.MissingActions + ": grant it to the GitHub App and accept the new permissions on the installation.", "Dokploy deploys are not shown: no deploy source is configured."},
+		Rows: []inflight.Row{
+			{App: "shop", Env: "testing", Kind: inflight.KindSync, To: "3f2a9c1", Health: "Progressing", Argo: &inflight.Argo{Application: "shop-testing", Sync: "OutOfSync", Health: "Progressing", Revision: "3f2a9c1e5b7d"}, WaitingOn: inflight.WaitSync, Since: ago(time.Minute)},
+			{App: "photos", Env: "production", Kind: inflight.KindPromotion, PR: 412, URL: "https://github.com/example/infra/pull/412", Title: "promote(pin): photos 2.4.0 → 2.4.1", From: "2.4.0", To: "2.4.1", Health: "success", CI: "unknown", SoakRemainingS: secs(0), WaitingOn: inflight.WaitCI, Since: ago(12 * time.Minute), Notes: []string{inflight.MissingActions}},
+			{App: "shop", Env: "production", Kind: inflight.KindPromotion, PR: 409, URL: "https://github.com/example/infra/pull/409", Title: "promote(pin): shop 1.8.2 → 1.9.0", From: "1.8.2", To: "1.9.0", Health: "merged", CI: "merged", WatchRemainingS: secs(38 * time.Minute), Argo: &inflight.Argo{Application: "shop", Sync: "Synced", Health: "Healthy", Revision: "8d0e4b2aa1c3"}, WaitingOn: inflight.WaitWatch, Since: ago(22 * time.Minute)},
+			{App: "blog", Env: "production", Kind: inflight.KindPromotion, PR: 405, URL: "https://github.com/example/infra/pull/405", Title: "promote(pin): blog 0.9 → 1.0", From: "0.9", To: "1.0", Health: "failure", HealthDetail: "3 error lines in testing", CI: "success", SoakRemainingS: secs(0), WaitingOn: inflight.WaitHealth, Since: ago(3 * time.Hour)},
+		},
+	}, nil
 }

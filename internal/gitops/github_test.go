@@ -541,3 +541,26 @@ func TestRollbackBodyFallsBackToParentFolder(t *testing.T) {
 		t.Errorf("commit queries = %v", f.queried)
 	}
 }
+
+func TestGetAndIsForbidden(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/o/r/pulls" && r.Header.Get("Authorization") == "Bearer t" {
+			w.Write([]byte(`[{"number":3}]`))
+			return
+		}
+		http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
+	}))
+	defer srv.Close()
+	g := &GitHub{API: srv.URL, Token: "t"}
+	var pulls []struct{ Number int }
+	if err := g.Get(context.Background(), "/repos/o/r/pulls?state=open", &pulls); err != nil || len(pulls) != 1 || pulls[0].Number != 3 {
+		t.Fatalf("pulls = %v, err = %v", pulls, err)
+	}
+	err := g.Get(context.Background(), "/repos/o/r/commits/x/status", nil)
+	if !IsForbidden(err) {
+		t.Fatalf("err = %v", err)
+	}
+	if IsForbidden(errors.New("other")) {
+		t.Fatal("a plain error is not a 403")
+	}
+}

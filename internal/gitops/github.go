@@ -608,3 +608,9 @@ func (g *GitHub) commitsTouching(ctx context.Context, repo, base, from string, p
 	})
 	return out, nil
 }
+
+func (g *GitHub) Get(ctx context.Context, p string, out any) error {
+	return g.do(ctx, http.MethodGet, p, nil, out)
+}
+
+func IsForbidden(err error) bool { return isStatus(err, http.StatusForbidden) }

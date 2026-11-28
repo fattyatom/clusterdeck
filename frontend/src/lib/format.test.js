@@ -56,6 +56,7 @@ test("bounds and linePath scale points into the box", () => {
 
 test("parseRoute and appHref round-trip", () => {
   assert.deepEqual(parseRoute(""), { view: "overview" });
+  assert.deepEqual(parseRoute("#inflight"), { view: "inflight" });
   assert.deepEqual(parseRoute("#backups"), { view: "backups" });
   assert.deepEqual(parseRoute("#nonsense"), { view: "overview" });
   assert.deepEqual(parseRoute(appHref("shop-testing", "my app")), { view: "app", namespace: "shop-testing", app: "my app" });

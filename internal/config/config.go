@@ -31,6 +31,10 @@ type Config struct {
 	GitHubAPIURL            string
 	GitHubAppID             string
 	GitHubAppPrivateKey     string
+	InFlightRepo            string
+	InFlightBranch          string
+	SoakSeconds             int64
+	WatchSeconds            int64
 	OIDCIssuerURL           string
 	OIDCClientID            string
 	OIDCClientSecret        string
@@ -70,6 +74,8 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 		GitHubAPIURL:            get("GITHUB_API_URL", "https://api.github.com"),
 		GitHubAppID:             get("GITHUB_APP_ID", ""),
 		GitHubAppPrivateKey:     get("GITHUB_APP_PRIVATE_KEY", ""),
+		InFlightRepo:            get("INFLIGHT_REPO", ""),
+		InFlightBranch:          get("INFLIGHT_BRANCH", "main"),
 		OIDCIssuerURL:           get("OIDC_ISSUER_URL", ""),
 		OIDCClientID:            get("OIDC_CLIENT_ID", ""),
 		OIDCClientSecret:        get("OIDC_CLIENT_SECRET", ""),
@@ -93,6 +99,17 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 	}
 	if c.SessionTTL, err = time.ParseDuration(get("SESSION_TTL", "12h")); err != nil || c.SessionTTL < 5*time.Minute {
 		return nil, fmt.Errorf("SESSION_TTL must be a duration of at least 5m")
+	}
+	for key, dst := range map[string]*int64{"SOAK_SECONDS": &c.SoakSeconds, "WATCH_SECONDS": &c.WatchSeconds} {
+		if *dst, err = strconv.ParseInt(get(key, "3600"), 10, 64); err != nil || *dst < 0 {
+			return nil, fmt.Errorf("%s must be a whole number of seconds", key)
+		}
+	}
+	if c.InFlightRepo != "" {
+		owner, name, ok := strings.Cut(c.InFlightRepo, "/")
+		if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+			return nil, fmt.Errorf("INFLIGHT_REPO must be owner/name, got %q", c.InFlightRepo)
+		}
 	}
 	if (c.GitHubAppID == "") != (c.GitHubAppPrivateKey == "") {
 		return nil, fmt.Errorf("GitHub App auth needs both GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY")
