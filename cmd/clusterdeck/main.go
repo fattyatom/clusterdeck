@@ -98,6 +98,9 @@ func run(logger *slog.Logger) error {
 		Static:         web.FS(),
 		Logger:         logger,
 	}
+	if cfg.InFlightRepo != "" && github == nil {
+		logger.Warn("In flight view off: INFLIGHT_REPO is set but there is no GITHUB_TOKEN or GitHub App", "repo", cfg.InFlightRepo)
+	}
 	if cfg.InFlightRepo != "" && github != nil {
 		owner, name, _ := strings.Cut(cfg.InFlightRepo, "/")
 		opts.InFlight = &inflight.Service{

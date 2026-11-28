@@ -316,7 +316,7 @@ The binary reads environment variables; the chart sets them from values.
 | `AUTO_ROLLBACK_ENABLED`, `AUTO_ROLLBACK_INTERVAL` | `false`, `30s`; needs `ACTIONS_ENABLED` |
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` | empty; both or neither; the App wins over `GITHUB_TOKEN` |
 | `GITHUB_TOKEN`, `GITHUB_API_URL` | empty (no rollback by pull request), `https://api.github.com` |
-| `INFLIGHT_REPO`, `INFLIGHT_BRANCH` | empty: no In flight view; `main`. Needs a GitHub token or App |
+| `INFLIGHT_REPO`, `INFLIGHT_BRANCH` | empty: no In flight view; `main`. Without a GitHub token or App the view stays off and a warning is logged |
 | `SOAK_SECONDS`, `WATCH_SECONDS` | `3600`, `3600`; match the promoter's |
 | `HIDE_NAMESPACES` | `kube-system,kube-public,kube-node-lease` (Apps tab only) |
 | `BACKUP_SELECTOR`, `RESTORE_CHECK_SELECTOR`, `RESTORE_TEMPLATE_SELECTOR` | `clusterdeck.io/role=...` |

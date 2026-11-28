@@ -31,7 +31,6 @@ func TestValidation(t *testing.T) {
 		"short session secret":         {"SESSION_SECRET": "short"},
 		"session ttl too short":        {"SESSION_TTL": "1m"},
 		"inflight repo not owner/name": {"INFLIGHT_REPO": "homelab", "GITHUB_TOKEN": "t"},
-		"inflight without github":      {"INFLIGHT_REPO": "o/r"},
 		"bad soak":                     {"SOAK_SECONDS": "1h"},
 		"negative watch":               {"WATCH_SECONDS": "-1"},
 	}
@@ -104,6 +103,9 @@ func TestInFlight(t *testing.T) {
 	c, err := FromEnv(env(map[string]string{"INFLIGHT_REPO": "fattyatom/homelab", "GITHUB_TOKEN": "t", "SOAK_SECONDS": "1800"}))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := FromEnv(env(map[string]string{"INFLIGHT_REPO": "o/r"})); err != nil {
+		t.Fatalf("INFLIGHT_REPO without GitHub credentials must not stop the start: %v", err)
 	}
 	if c.InFlightRepo != "fattyatom/homelab" || c.InFlightBranch != "main" || c.SoakSeconds != 1800 || c.WatchSeconds != 3600 {
 		t.Fatalf("config = %+v", c)

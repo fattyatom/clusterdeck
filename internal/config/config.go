@@ -110,9 +110,6 @@ func FromEnv(getenv func(string) string) (*Config, error) {
 		if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
 			return nil, fmt.Errorf("INFLIGHT_REPO must be owner/name, got %q", c.InFlightRepo)
 		}
-		if c.GitHubToken == "" && c.GitHubAppID == "" {
-			return nil, fmt.Errorf("INFLIGHT_REPO needs GITHUB_TOKEN or GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY")
-		}
 	}
 	if (c.GitHubAppID == "") != (c.GitHubAppPrivateKey == "") {
 		return nil, fmt.Errorf("GitHub App auth needs both GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY")
