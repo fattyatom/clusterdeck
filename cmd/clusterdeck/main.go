@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/fattyatom/clusterdeck/internal/auth"
 	"github.com/fattyatom/clusterdeck/internal/config"
 	"github.com/fattyatom/clusterdeck/internal/gitops"
+	"github.com/fattyatom/clusterdeck/internal/inflight"
 	"github.com/fattyatom/clusterdeck/internal/kube"
 	"github.com/fattyatom/clusterdeck/internal/metrics"
 	"github.com/fattyatom/clusterdeck/internal/server"
@@ -61,6 +63,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	cluster.ActionNamespaces = cfg.ActionsNamespaces
+	var github *gitops.GitHub
 	switch {
 	case cfg.GitHubAppID != "":
 		key, err := gitops.ParsePrivateKey(cfg.GitHubAppPrivateKey)
@@ -68,10 +71,12 @@ func run(logger *slog.Logger) error {
 			return fmt.Errorf("GITHUB_APP_PRIVATE_KEY: %w", err)
 		}
 		auth := &gitops.AppAuth{API: cfg.GitHubAPIURL, AppID: cfg.GitHubAppID, Key: key}
-		cluster.Git = &gitops.GitHub{API: cfg.GitHubAPIURL, Auth: auth}
+		github = &gitops.GitHub{API: cfg.GitHubAPIURL, Auth: auth}
+		cluster.Git = github
 		logger.Info("GitHub auth via GitHub App", "app_id", cfg.GitHubAppID)
 	case cfg.GitHubToken != "":
-		cluster.Git = &gitops.GitHub{API: cfg.GitHubAPIURL, Token: cfg.GitHubToken}
+		github = &gitops.GitHub{API: cfg.GitHubAPIURL, Token: cfg.GitHubToken}
+		cluster.Git = github
 		logger.Info("GitHub auth via GITHUB_TOKEN")
 	}
 
@@ -92,6 +97,13 @@ func run(logger *slog.Logger) error {
 		GitRollback:    cluster.Git != nil,
 		Static:         web.FS(),
 		Logger:         logger,
+	}
+	if cfg.InFlightRepo != "" && github != nil {
+		owner, name, _ := strings.Cut(cfg.InFlightRepo, "/")
+		opts.InFlight = &inflight.Service{
+			GitHub: github, Argo: cluster, Owner: owner, Repo: name, Branch: cfg.InFlightBranch,
+			Soak: time.Duration(cfg.SoakSeconds) * time.Second, Watch: time.Duration(cfg.WatchSeconds) * time.Second,
+		}
 	}
 	if cfg.OIDC() {
 		login, err := auth.New(auth.Config{

@@ -19,17 +19,21 @@ func TestDefaults(t *testing.T) {
 
 func TestValidation(t *testing.T) {
 	cases := map[string]map[string]string{
-		"actions without identity": {"ACTIONS_ENABLED": "true"},
-		"bad bool":                 {"ACTIONS_ENABLED": "yes please"},
-		"signoz without key":       {"METRICS_PROVIDER": "signoz", "SIGNOZ_URL": "http://s"},
-		"prometheus without url":   {"METRICS_PROVIDER": "prometheus"},
-		"unknown provider":         {"METRICS_PROVIDER": "datadog"},
-		"auto rollback alone":      {"AUTO_ROLLBACK_ENABLED": "true"},
-		"interval too short":       {"AUTO_ROLLBACK_INTERVAL": "1s"},
-		"oidc half set":            {"OIDC_ISSUER_URL": "https://id", "OIDC_CLIENT_ID": "c"},
-		"oidc and header":          {"AUTH_HEADER": "X-User", "OIDC_ISSUER_URL": "https://id", "OIDC_CLIENT_ID": "c", "OIDC_CLIENT_SECRET": "s", "OIDC_REDIRECT_URL": "https://d/auth/callback"},
-		"short session secret":     {"SESSION_SECRET": "short"},
-		"session ttl too short":    {"SESSION_TTL": "1m"},
+		"actions without identity":     {"ACTIONS_ENABLED": "true"},
+		"bad bool":                     {"ACTIONS_ENABLED": "yes please"},
+		"signoz without key":           {"METRICS_PROVIDER": "signoz", "SIGNOZ_URL": "http://s"},
+		"prometheus without url":       {"METRICS_PROVIDER": "prometheus"},
+		"unknown provider":             {"METRICS_PROVIDER": "datadog"},
+		"auto rollback alone":          {"AUTO_ROLLBACK_ENABLED": "true"},
+		"interval too short":           {"AUTO_ROLLBACK_INTERVAL": "1s"},
+		"oidc half set":                {"OIDC_ISSUER_URL": "https://id", "OIDC_CLIENT_ID": "c"},
+		"oidc and header":              {"AUTH_HEADER": "X-User", "OIDC_ISSUER_URL": "https://id", "OIDC_CLIENT_ID": "c", "OIDC_CLIENT_SECRET": "s", "OIDC_REDIRECT_URL": "https://d/auth/callback"},
+		"short session secret":         {"SESSION_SECRET": "short"},
+		"session ttl too short":        {"SESSION_TTL": "1m"},
+		"inflight repo not owner/name": {"INFLIGHT_REPO": "homelab", "GITHUB_TOKEN": "t"},
+		"inflight without github":      {"INFLIGHT_REPO": "o/r"},
+		"bad soak":                     {"SOAK_SECONDS": "1h"},
+		"negative watch":               {"WATCH_SECONDS": "-1"},
 	}
 	for name, e := range cases {
 		if _, err := FromEnv(env(e)); err == nil {
@@ -93,5 +97,15 @@ func TestGitHubAppNeedsIDAndKeyTogether(t *testing.T) {
 	c, err := FromEnv(env(map[string]string{"GITHUB_APP_ID": "1", "GITHUB_APP_PRIVATE_KEY": "k"}))
 	if err != nil || c.GitHubAppID != "1" || c.GitHubAppPrivateKey != "k" {
 		t.Fatalf("config = %+v, %v", c, err)
+	}
+}
+
+func TestInFlight(t *testing.T) {
+	c, err := FromEnv(env(map[string]string{"INFLIGHT_REPO": "fattyatom/homelab", "GITHUB_TOKEN": "t", "SOAK_SECONDS": "1800"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.InFlightRepo != "fattyatom/homelab" || c.InFlightBranch != "main" || c.SoakSeconds != 1800 || c.WatchSeconds != 3600 {
+		t.Fatalf("config = %+v", c)
 	}
 }

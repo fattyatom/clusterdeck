@@ -15,6 +15,7 @@ undo it. Where it would, the rollback is a pull request.
 | Overview | Node readiness, CPU and memory now, pod phases, recent warning events | Kubernetes API, metrics-server |
 | Apps | Workloads grouped by `app.kubernetes.io/name`, ready replicas, restarts, pods, logs filtered by time range, severity and text, Argo CD sync and health | Kubernetes API, Argo CD `Application`s (optional) |
 | App → Rollouts | Per Deployment: a Synced → Rolled out → Available → Healthy pipeline, the last 10 revisions with their images, Argo CD sync history, **Roll back** to any revision, and opt-in **auto-rollback** | Deployments, ReplicaSets, pods, Argo CD `Application`s |
+| In flight | Every promotion and rollback pull request still open, merged promotions still inside their watch window, and Argo CD applications not yet synced or healthy, newest first, with what each is waiting on | GitHub (pull requests, commit statuses, Actions), Argo CD `Application`s (optional) |
 | Backups | Every backup and restore-check CronJob: health, last success, next run, last 5 runs, **Run now** | CronJobs and Jobs you label |
 | Restore | Restore templates with typed parameters and a typed confirmation | ConfigMaps you label |
 | Load | CPU, memory and restarts by node and namespace over 1h to 7d | SigNoz or Prometheus (optional) |
@@ -259,6 +260,34 @@ DaemonSets are not.
 | pending | New, has not had the chance to run yet |
 | suspended | `spec.suspend: true` |
 
+## In flight
+
+`GET /api/inflight` lists every deployment still under way in one repository
+(`INFLIGHT_REPO`, `owner/name`), using the GitHub token or App above. It is
+read-only and cached for 60 seconds so the page does not spend the rate limit.
+
+| Row | From | Waiting on |
+|---|---|---|
+| Open pull request labelled `pin-promotion`, `pin-rollback` or `folder-promotion` | the `<!-- pin-promoter:{json} -->` footer (`old_tag` → `new_tag`, `path`, `source`, or `mode: folder` with `source_commit`) | `soak` while the bump in the testing file is younger than `SOAK_SECONDS`, then `health` until the `pin-promoter/testing-health` status is green, `CI` until `ci-ok` (or `ci-ok-fallback`) and every other check is green, `human` with the `needs-human` label, else `merge` |
+| Merged promotion, not labelled `watch-ok` or `rolled-back` | merged within `WATCH_SECONDS` (plus 15 minutes of grace) | `watch` |
+| Merged rollback | until its Argo CD application is `Synced` and `Healthy` | `sync` |
+| Argo CD `Application` | not `Synced`, an operation running, or not `Healthy` | `sync` or `health` |
+
+The soak is the age of the newest commit on `INFLIGHT_BRANCH` whose diff of the
+testing file adds or removes `repo:new_tag` (only `new_tag` in a
+`kustomization.yaml`), the same rule as pin-promoter's `bump_age_seconds`.
+Applications are matched by name: `<app>` for production, `<app>-<env>`
+otherwise, where `<app>` is the folder above `production/` or `testing/` in the
+footer's path.
+
+The GitHub App needs **Pull requests: read** and **Contents: read**, and for
+the health and CI columns also **Commit statuses: read** and **Actions: read**.
+Without the last two the rows stay, the column shows `unknown`, and the page
+names the missing permission.
+
+Deploys that no Argo CD application tracks (Dokploy, plain compose) have no
+source yet; the page says so.
+
 ## Metrics
 
 | `metrics.provider` | Needs | Metrics used |
@@ -287,6 +316,8 @@ The binary reads environment variables; the chart sets them from values.
 | `AUTO_ROLLBACK_ENABLED`, `AUTO_ROLLBACK_INTERVAL` | `false`, `30s`; needs `ACTIONS_ENABLED` |
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` | empty; both or neither; the App wins over `GITHUB_TOKEN` |
 | `GITHUB_TOKEN`, `GITHUB_API_URL` | empty (no rollback by pull request), `https://api.github.com` |
+| `INFLIGHT_REPO`, `INFLIGHT_BRANCH` | empty: no In flight view; `main`. Needs a GitHub token or App |
+| `SOAK_SECONDS`, `WATCH_SECONDS` | `3600`, `3600`; match the promoter's |
 | `HIDE_NAMESPACES` | `kube-system,kube-public,kube-node-lease` (Apps tab only) |
 | `BACKUP_SELECTOR`, `RESTORE_CHECK_SELECTOR`, `RESTORE_TEMPLATE_SELECTOR` | `clusterdeck.io/role=...` |
 | `METRICS_PROVIDER` | `none` |

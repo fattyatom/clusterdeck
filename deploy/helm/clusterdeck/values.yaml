@@ -42,6 +42,12 @@ gitops:
       appIDKey: app-id
       privateKeyKey: private-key
 
+inflight:
+  repo: ""
+  branch: main
+  soakSeconds: 3600
+  watchSeconds: 3600
+
 metrics:
   provider: none
   signoz:

@@ -109,7 +109,7 @@ export function parseRoute(hash) {
   const parts = (hash || "").replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
   const view = parts[0] || "overview";
   if (view === "apps" && parts.length === 3) return { view: "app", namespace: parts[1], app: parts[2] };
-  if (["overview", "apps", "backups", "load"].includes(view)) return { view };
+  if (["overview", "apps", "inflight", "backups", "load"].includes(view)) return { view };
   return { view: "overview" };
 }
 

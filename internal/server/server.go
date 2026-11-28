@@ -14,6 +14,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/fattyatom/clusterdeck/internal/inflight"
 	"github.com/fattyatom/clusterdeck/internal/kube"
 	"github.com/fattyatom/clusterdeck/internal/metrics"
 )
@@ -32,6 +33,10 @@ type Cluster interface {
 	RollbackPR(ctx context.Context, appNS, app, toRevision, user string) (string, error)
 }
 
+type InFlight interface {
+	Report(ctx context.Context) (*inflight.Report, error)
+}
+
 type Login interface {
 	User(r *http.Request) string
 	LoginURL(next string) string
@@ -46,6 +51,7 @@ type Options struct {
 	ActionsEnabled bool
 	AutoRollback   bool
 	GitRollback    bool
+	InFlight       InFlight
 	Static         fs.FS
 	Logger         *slog.Logger
 	Now            func() time.Time
@@ -98,6 +104,7 @@ func New(cluster Cluster, provider metrics.Provider, opts Options) *Server {
 	s.mux.Handle("GET /api/metrics/{panel}", s.read(s.handleMetrics))
 	s.mux.Handle("GET /api/pods/{ns}/{pod}/logs", s.read(s.handleLogs))
 	s.mux.Handle("GET /api/rollouts/{ns}/{app}", s.read(s.handleRollouts))
+	s.mux.Handle("GET /api/inflight", s.read(s.handleInFlight))
 	s.mux.Handle("POST /api/deployments/{ns}/{name}/rollback", s.action(s.handleRollback))
 	s.mux.Handle("POST /api/argo/{ns}/{app}/rollback-pr", s.action(s.handleRollbackPR))
 	s.mux.Handle("POST /api/cronjobs/{ns}/{name}/run", s.action(s.handleRunCronJob))
@@ -203,7 +210,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		status = http.StatusBadRequest
 	case errors.Is(err, kube.ErrForbidden):
 		status = http.StatusForbidden
-	case errors.Is(err, metrics.ErrNotConfigured):
+	case errors.Is(err, metrics.ErrNotConfigured), errors.Is(err, inflight.ErrNotConfigured):
 		status = http.StatusNotImplemented
 	case apierrors.IsNotFound(err):
 		status = http.StatusNotFound
@@ -231,6 +238,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) error {
 		"metricsProvider": s.metrics.Name(),
 		"autoRollback":    s.opts.AutoRollback,
 		"gitRollback":     s.opts.GitRollback,
+		"inflight":        s.opts.InFlight != nil,
 		"panels":          metrics.Panels,
 		"logout":          s.logoutPath(),
 	})
@@ -397,4 +405,16 @@ func (s *Server) handleRestart(_ http.ResponseWriter, r *http.Request) (string, 
 		return "", err
 	}
 	return "restarted " + kind + "/" + name, nil
+}
+
+func (s *Server) handleInFlight(w http.ResponseWriter, r *http.Request) error {
+	if s.opts.InFlight == nil {
+		return inflight.ErrNotConfigured
+	}
+	rep, err := s.opts.InFlight.Report(r.Context())
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, rep)
+	return nil
 }

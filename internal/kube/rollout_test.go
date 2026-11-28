@@ -277,3 +277,37 @@ func TestAutoRollback(t *testing.T) {
 		}
 	})
 }
+
+func TestArgoApplications(t *testing.T) {
+	syncing := argoAppObj("shop-testing", nil)
+	syncing["status"].(map[string]any)["sync"] = map[string]any{"status": "OutOfSync", "revision": "fedcba9876"}
+	syncing["status"].(map[string]any)["operationState"] = map[string]any{"phase": "Running", "startedAt": "2026-11-28T09:00:00Z"}
+	c, _ := newClient(t, argoDyn(t, argoAppObj("shop", nil), syncing))
+	apps, err := c.ArgoApplications(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]ArgoApplication{}
+	for _, a := range apps {
+		byName[a.Name] = a
+	}
+	s := byName["shop-testing"]
+	if s.Sync != "OutOfSync" || s.Revision != "fedcba9876" || s.OperationPhase != "Running" || s.Destination != "shop" {
+		t.Fatalf("shop-testing = %+v", s)
+	}
+	if s.Changed == nil || !s.Changed.Equal(time.Date(2026, 11, 28, 9, 0, 0, 0, time.UTC)) {
+		t.Fatalf("changed = %v", s.Changed)
+	}
+	if p := byName["shop"]; p.Sync != "Synced" || p.Health != "Healthy" || p.Changed != nil {
+		t.Fatalf("shop = %+v", p)
+	}
+}
+
+func TestArgoApplicationsWithoutDynamicClient(t *testing.T) {
+	c, _ := newClient(t, nil)
+	c.Dynamic = nil
+	apps, err := c.ArgoApplications(context.Background())
+	if err != nil || apps != nil {
+		t.Fatalf("apps = %v, err = %v", apps, err)
+	}
+}
